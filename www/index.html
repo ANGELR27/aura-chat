@@ -1518,11 +1518,12 @@
     }
 
     /* ===== CHAT MESSAGES ENGINE ===== */
-    async function loadChatMessages() {
-        if (!currentUser) return;
-        const partner = getPartnerProfile();
+    let _loadingChat = false;
 
-        let serverMessages = [];
+    async function loadChatMessages() {
+        if (!currentUser || _loadingChat) return;
+        _loadingChat = true;
+
         try {
             const { data: chatPosts, error } = await sb.from('posts')
                 .select('*')
@@ -1530,61 +1531,50 @@
                 .order('created_at', { ascending: true })
                 .limit(300);
 
-            if (!error && chatPosts && chatPosts.length > 0) {
-                serverMessages = chatPosts.filter(p => p.text && p.text.includes('[CHAT]')).map(p => ({
+            if (error) {
+                console.warn('[ROAN] loadChatMessages DB error:', error.message);
+                _loadingChat = false;
+                return;
+            }
+
+            // Server messages are the SINGLE SOURCE OF TRUTH
+            const serverMessages = (chatPosts || [])
+                .filter(p => p.text && p.text.includes('[CHAT]'))
+                .map(p => ({
                     id: p.id,
                     sender_id: p.user_id,
                     text: p.text.replace(/^\[CHAT\]\s*/, '').trim(),
                     created_at: p.created_at
                 }));
-            }
+
+            // Collect server IDs for quick lookup
+            const serverIds = new Set(serverMessages.map(m => m.id));
+
+            // Keep only local_ temp messages that DON'T have a server counterpart yet
+            const pendingLocalMsgs = currentChatMessages.filter(m => {
+                if (!m.id || !m.id.startsWith('local_')) return false;
+                // Check if server already has this message (by matching sender + text)
+                const hasServerVersion = serverMessages.some(sm =>
+                    sm.sender_id === m.sender_id &&
+                    sm.text === m.text
+                );
+                return !hasServerVersion;
+            });
+
+            // Final list: all server messages + pending local messages, sorted by time
+            const allMessages = [...serverMessages, ...pendingLocalMsgs]
+                .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+
+            currentChatMessages = allMessages;
+            localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
+            lastChatHash = '__FORCE_RERENDER__';
+            renderChatMessages();
+
         } catch(e) {
-            console.warn('loadChatMessages error:', e);
+            console.warn('[ROAN] loadChatMessages exception:', e);
         }
 
-        const localChat = JSON.parse(localStorage.getItem('aura_local_chat') || '[]');
-        const combined = [...localChat, ...currentChatMessages, ...serverMessages];
-
-        // Bulletproof Deduplication
-        const sorted = combined.filter(m => m && m.text).sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
-        const finalMessages = [];
-        const seenIds = new Set();
-        const serverSignatures = [];
-
-        sorted.forEach(m => {
-            if (m.id && !m.id.startsWith('local_')) {
-                seenIds.add(m.id);
-                serverSignatures.push({
-                    sender: m.sender_id || m.user_id || 'me',
-                    text: m.text.replace(/^\[CHAT\]\s*/, '').trim(),
-                    time: new Date(m.created_at || Date.now()).getTime()
-                });
-            }
-        });
-
-        const finalSeenIds = new Set();
-        sorted.forEach(m => {
-            const cleanText = m.text.replace(/^\[CHAT\]\s*/, '').trim();
-            const sender = m.sender_id || m.user_id || 'me';
-            const msgTime = new Date(m.created_at || Date.now()).getTime();
-
-            // Skip if exact ID already included
-            if (m.id && finalSeenIds.has(m.id)) return;
-
-            // If it's a temporary local message, only skip if the server version has already arrived
-            if (m.id && m.id.startsWith('local_')) {
-                const hasServerMatch = serverSignatures.some(s => s.sender === sender && s.text === cleanText && Math.abs(s.time - msgTime) < 90000);
-                if (hasServerMatch) return;
-            }
-
-            if (m.id) finalSeenIds.add(m.id);
-            m.text = cleanText;
-            finalMessages.push(m);
-        });
-
-        currentChatMessages = finalMessages;
-        localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
-        renderChatMessages();
+        _loadingChat = false;
 
         if (!document.hidden && currentUser) {
             try {
@@ -1858,20 +1848,9 @@
             console.warn('Chat insert error:', e);
         }
 
-        try {
-            realtimeChannelGlobal?.send({
-                type: 'broadcast',
-                event: 'new_message',
-                payload: {
-                    id: tempMsg.id,
-                    sender_id: currentUser.id,
-                    text: payloadText,
-                    created_at: tempMsg.created_at
-                }
-            });
-        } catch(e) {}
-
-        setTimeout(() => loadChatMessages(), 1000);
+        // The postgres_changes listener will auto-render the confirmed message.
+        // This reload is just a safety net.
+        setTimeout(() => loadChatMessages(), 300);
     }
 
     async function handleSendChatImage(e) {
@@ -2082,14 +2061,14 @@
             if (document.visibilityState === 'visible') loadChatMessages();
         });
 
-        // FALLBACK POLLING: every 8 seconds, silently check for new messages
+        // FALLBACK POLLING: every 4 seconds, silently check for new messages
         // This catches anything postgres_changes might miss (reconnections, etc.)
         if (chatPollingInterval) clearInterval(chatPollingInterval);
         chatPollingInterval = setInterval(() => {
             if (!document.hidden && currentUser) {
                 loadChatMessages();
             }
-        }, 8000);
+        }, 4000);
     }
 
     /* ===== INIT ===== */
