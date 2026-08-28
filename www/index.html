@@ -296,24 +296,18 @@
                         </p>
                     </div>
                 </div>
-                <div class="flex items-center gap-1 sm:gap-1.5">
-                    <button onclick="testNotificationNow()" class="p-2 rounded-xl glass hover:scale-105 active:scale-95 transition-all text-pink-600 dark:text-orange-400 cursor-pointer shadow-sm" title="Probar / Activar Notificaciones 🔔">
-                        <i data-lucide="bell" class="w-4.5 h-4.5"></i>
+                <div class="flex items-center gap-1.5 sm:gap-2">
+                    <button onclick="initiateWebRTCCall('audio')" class="w-9 h-9 rounded-2xl glass hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 transition-all text-neutral-700 dark:text-neutral-200 flex items-center justify-center cursor-pointer shadow-xs border border-white/60 dark:border-white/10" title="Llamada de Voz">
+                        <i data-lucide="phone" class="w-4 h-4"></i>
                     </button>
-                    <button onclick="initiateWebRTCCall('audio')" class="p-2 rounded-xl glass hover:scale-105 active:scale-95 transition-all text-emerald-600 dark:text-emerald-400 cursor-pointer shadow-sm" title="Llamada de Voz">
-                        <i data-lucide="phone" class="w-4.5 h-4.5"></i>
+                    <button onclick="initiateWebRTCCall('video')" class="w-9 h-9 rounded-2xl glass hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 transition-all text-neutral-700 dark:text-neutral-200 flex items-center justify-center cursor-pointer shadow-xs border border-white/60 dark:border-white/10" title="Videollamada">
+                        <i data-lucide="video" class="w-4 h-4"></i>
                     </button>
-                    <button onclick="initiateWebRTCCall('video')" class="p-2 rounded-xl glass hover:scale-105 active:scale-95 transition-all text-pink-600 dark:text-orange-400 cursor-pointer shadow-sm" title="Videollamada">
-                        <i data-lucide="video" class="w-4.5 h-4.5"></i>
-                    </button>
-                    <button onclick="toggleThemeMode()" class="p-2 rounded-xl glass hover:scale-105 active:scale-95 transition-all text-neutral-600 dark:text-orange-400 cursor-pointer" title="Cambiar Tema">
+                    <button onclick="toggleThemeMode()" class="w-9 h-9 rounded-2xl glass hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 transition-all text-neutral-700 dark:text-neutral-200 flex items-center justify-center cursor-pointer shadow-xs border border-white/60 dark:border-white/10" title="Cambiar Tema">
                         <i data-lucide="moon" class="w-4 h-4 hidden dark:block"></i>
                         <i data-lucide="sun" class="w-4 h-4 block dark:hidden"></i>
                     </button>
-                    <button onclick="sendQuickHeart()" class="glass p-2 rounded-xl text-rose-500 hover:scale-115 active:scale-95 transition-all cursor-pointer shadow-sm" title="Enviar amor ❤️">
-                        <i data-lucide="heart" class="w-4.5 h-4.5 fill-rose-500"></i>
-                    </button>
-                    <button onclick="handleLogout()" class="p-2 rounded-xl glass hover:scale-105 active:scale-95 transition-all text-neutral-400 hover:text-rose-500 cursor-pointer" title="Cerrar Sesión">
+                    <button onclick="handleLogout()" class="w-9 h-9 rounded-2xl glass hover:bg-rose-500/10 dark:hover:bg-rose-500/20 active:scale-95 transition-all text-neutral-400 hover:text-rose-500 dark:text-neutral-400 dark:hover:text-rose-400 flex items-center justify-center cursor-pointer shadow-xs border border-white/60 dark:border-white/10" title="Cerrar Sesión">
                         <i data-lucide="log-out" class="w-4 h-4"></i>
                     </button>
                 </div>
@@ -690,85 +684,63 @@
     }
 
     async function requestNotificationPermission() {
-        if (!('Notification' in window)) return;
-        if (Notification.permission === 'default') {
-            try {
-                const res = await Notification.requestPermission();
-                if (res === 'granted') {
-                    toast('¡Notificaciones activadas con éxito! 🔔', 'success');
-                    confetti({ particleCount: 30, spread: 60 });
-                }
-            } catch(e) {}
-        }
-    }
-
-    async function testNotificationNow() {
-        triggerHaptic();
-        if (!('Notification' in window)) {
-            return toast('Tu navegador o dispositivo no soporta notificaciones nativas', 'error');
-        }
-        if (Notification.permission !== 'granted') {
-            const res = await Notification.requestPermission();
-            if (res !== 'granted') {
-                return toast('Debes permitir las notificaciones en los ajustes del dispositivo', 'error');
-            }
-        }
-        toast('Enviando notificación de prueba... 🔔', 'info');
-        const partner = getPartnerProfile();
-        await sendNativeNotification(`Prueba de ROAN 💕`, `¡Las notificaciones están funcionando perfectamente con ${partner.name}! ✨`, partner.avatar_url);
-    }
-
-    async function forceEnableNotifications() {
-        if (!('Notification' in window)) return toast('Este navegador no soporta notificaciones', 'error');
-        triggerHaptic();
         try {
-            const res = await Notification.requestPermission();
-            if (res === 'granted') {
-                toast('¡Notificaciones activadas con éxito! 🔔', 'success');
-                confetti({ particleCount: 30, spread: 60 });
-                await sendNativeNotification('ROAN Conectado 💕', 'Notificaciones activadas y listas para recibir mensajes ✨');
-            } else {
-                toast('Permiso de notificaciones no concedido', 'info');
+            if (window.Capacitor?.Plugins?.LocalNotifications) {
+                await window.Capacitor.Plugins.LocalNotifications.requestPermissions();
             }
-        } catch(e) {
-            console.warn(e);
-        }
+            if ('Notification' in window && Notification.permission === 'default') {
+                await Notification.requestPermission();
+            }
+        } catch(e) {}
     }
 
     async function sendNativeNotification(title, body, icon, isMsg = true) {
         playNotificationSound();
         if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-        
-        if (!('Notification' in window)) return;
-        if (Notification.permission === 'default') {
-            try { await Notification.requestPermission(); } catch(e) {}
+
+        // 1. Capacitor Native Android System Tray (Heads-Up popup when app is outside/minimized)
+        if (window.Capacitor?.Plugins?.LocalNotifications) {
+            try {
+                await window.Capacitor.Plugins.LocalNotifications.schedule({
+                    notifications: [
+                        {
+                            title: title,
+                            body: body,
+                            id: Math.floor(Math.random() * 1000000),
+                            schedule: { at: new Date(Date.now() + 50) },
+                            sound: 'beep.wav',
+                            smallIcon: 'ic_stat_icon_config_sample',
+                            actionTypeId: '',
+                            extra: { url: window.location.href }
+                        }
+                    ]
+                });
+                return;
+            } catch(capErr) {
+                console.warn('[ROAN] LocalNotifications error:', capErr);
+            }
         }
-        if (Notification.permission !== 'granted') return;
 
-        const iconUrl = icon || './icon-192.png';
-        const badgeUrl = './badge-96.png';
-        const notifOptions = {
-            body: body,
-            icon: iconUrl,
-            badge: badgeUrl,
-            tag: 'roan-msg-' + Date.now(),
-            renotify: true,
-            vibrate: [200, 100, 200],
-            data: { url: window.location.href },
-            actions: isMsg ? [
-                { action: 'reply', type: 'text', title: 'Responder', placeholder: 'Escribe tu respuesta...' },
-                { action: 'open_chat', title: 'Abrir Chat' }
-            ] : [
-                { action: 'open_app', title: 'Abrir ROAN' }
-            ]
-        };
-
-        // 1. Primary: ServiceWorker Registration Notification (Best for Android & PWAs)
+        // 2. ServiceWorker Registration Notification (PWA / Android WebView)
         if ('serviceWorker' in navigator) {
             try {
                 const reg = await navigator.serviceWorker.ready;
                 if (reg && reg.showNotification) {
-                    await reg.showNotification(title, notifOptions);
+                    await reg.showNotification(title, {
+                        body: body,
+                        icon: icon || './icon-192.png',
+                        badge: './badge-96.png',
+                        tag: 'roan-msg-' + Date.now(),
+                        renotify: true,
+                        vibrate: [200, 100, 200],
+                        data: { url: window.location.href },
+                        actions: isMsg ? [
+                            { action: 'reply', type: 'text', title: 'Responder', placeholder: 'Escribe tu respuesta...' },
+                            { action: 'open_chat', title: 'Abrir Chat' }
+                        ] : [
+                            { action: 'open_app', title: 'Abrir ROAN' }
+                        ]
+                    });
                     return;
                 }
             } catch(e) {
@@ -776,11 +748,16 @@
             }
         }
 
-        // 2. Direct Window Notification fallback
+        // 3. Direct Window Notification fallback
         try {
-            const notif = new Notification(title, notifOptions);
-            notif.onclick = () => { window.focus(); notif.close(); };
-            setTimeout(() => notif.close(), 6000);
+            if ('Notification' in window && Notification.permission === 'granted') {
+                const notif = new Notification(title, {
+                    body: body,
+                    icon: icon || './icon-192.png'
+                });
+                notif.onclick = () => { window.focus(); notif.close(); };
+                setTimeout(() => notif.close(), 6000);
+            }
         } catch(e) {
             console.warn('Window Notification error:', e);
         }
@@ -2058,9 +2035,8 @@
                     if (isAudio) previewText = '🎤 Mensaje de voz';
                     else if (isPhoto) previewText = '📸 Foto';
 
-                    if (document.hidden) {
-                        sendNativeNotification(author.name, previewText, author.avatar_url);
-                    } else {
+                    sendNativeNotification(author.name, previewText, author.avatar_url);
+                    if (!document.hidden) {
                         showInAppNotification({
                             title: author.name,
                             message: previewText,
@@ -2163,9 +2139,8 @@
                         if (isAudio) previewText = '🎤 Mensaje de voz';
                         else if (isPhoto) previewText = '📸 Foto';
 
-                        if (document.hidden) {
-                            sendNativeNotification(author.name, previewText, author.avatar_url);
-                        } else {
+                        sendNativeNotification(author.name, previewText, author.avatar_url);
+                        if (!document.hidden) {
                             showInAppNotification({
                                 title: author.name,
                                 message: previewText,
