@@ -683,15 +683,67 @@
         } catch(e) {}
     }
 
-    async function requestNotificationPermission() {
+    async function initDeviceNotificationChannels() {
         try {
             if (window.Capacitor?.Plugins?.LocalNotifications) {
+                // Request Android runtime permissions
                 await window.Capacitor.Plugins.LocalNotifications.requestPermissions();
+
+                // Register Action Types for Interactive Incoming Call Notification
+                try {
+                    await window.Capacitor.Plugins.LocalNotifications.registerActionTypes({
+                        types: [
+                            {
+                                id: 'INCOMING_CALL',
+                                actions: [
+                                    { id: 'answer_call', title: '📞 Contestar' },
+                                    { id: 'reject_call', title: '❌ Rechazar', destructive: true }
+                                ]
+                            }
+                        ]
+                    });
+                } catch(e) {}
+
+                // Max-priority channel for incoming voice and video calls (Heads-Up popup banner on screen)
+                try {
+                    await window.Capacitor.Plugins.LocalNotifications.createChannel({
+                        id: 'roan_calls_channel',
+                        name: 'Llamadas ROAN',
+                        description: 'Notificaciones emergentes de llamadas y videollamadas',
+                        importance: 5,
+                        visibility: 1,
+                        sound: 'ringtone.wav',
+                        vibration: true,
+                        lights: true,
+                        lightColor: '#f43f5e'
+                    });
+                } catch(e) {}
+
+                // High-priority channel for chat messages
+                try {
+                    await window.Capacitor.Plugins.LocalNotifications.createChannel({
+                        id: 'roan_messages_channel',
+                        name: 'Mensajes ROAN',
+                        description: 'Notificaciones de mensajes de chat',
+                        importance: 4,
+                        visibility: 1,
+                        sound: 'beep.wav',
+                        vibration: true,
+                        lights: true,
+                        lightColor: '#f43f5e'
+                    });
+                } catch(e) {}
             }
             if ('Notification' in window && Notification.permission === 'default') {
                 await Notification.requestPermission();
             }
-        } catch(e) {}
+        } catch(e) {
+            console.warn('[ROAN] Notification channels init error:', e);
+        }
+    }
+
+    async function requestNotificationPermission() {
+        await initDeviceNotificationChannels();
     }
 
     async function sendNativeNotification(title, body, icon, isMsg = true) {
@@ -707,6 +759,7 @@
                             title: title,
                             body: body,
                             id: Math.floor(Math.random() * 1000000),
+                            channelId: 'roan_messages_channel',
                             schedule: { at: new Date(Date.now() + 50) },
                             sound: 'beep.wav',
                             smallIcon: 'ic_stat_icon_config_sample',
@@ -834,8 +887,9 @@
                             title: callTitle,
                             body: callBody,
                             id: 999999,
+                            channelId: 'roan_calls_channel',
                             schedule: { at: new Date(Date.now() + 50) },
-                            sound: 'beep.wav',
+                            sound: 'ringtone.wav',
                             ongoing: true,
                             autoCancel: false,
                             actionTypeId: 'INCOMING_CALL',
@@ -1367,9 +1421,7 @@
         showApp();
         loadChatMessages();
         setupRealtime();
-        if ('Notification' in window && Notification.permission === 'default') {
-            Notification.requestPermission();
-        }
+        initDeviceNotificationChannels();
         toast(`¡Hola, ${user.name}!`, 'success');
         confetti({ particleCount: 30, spread: 50 });
     }
@@ -1755,9 +1807,14 @@
             }
         }
 
+        const isMe = m.sender_id === currentUser.id;
+        const partner = getPartnerProfile();
+        const senderDisplayName = isMe ? (currentUser.name || 'Tú') : partner.name;
+        const msgKey = `${m.sender_id || currentUser.id}_${encodeURIComponent((m.text || '').substring(0, 30))}`;
+
         if (isMe) {
             return `
-                <div id="msg-bubble-${m.id}" data-msg-id="${m.id}" data-sender-id="${m.sender_id || currentUser.id}"
+                <div id="msg-bubble-${m.id}" data-msg-id="${m.id}" data-msg-key="${msgKey}" data-sender-id="${m.sender_id || currentUser.id}"
                      class="relative group flex justify-end items-end gap-1.5 transition-all duration-200"
                      ontouchstart="handleMsgTouchStart(event, '${m.id}', '${senderDisplayName}', '${safePreview}', true)"
                      ontouchmove="handleMsgTouchMove(event, this)"
@@ -1783,7 +1840,7 @@
             `;
         } else {
             return `
-                <div id="msg-bubble-${m.id}" data-msg-id="${m.id}" data-sender-id="${m.sender_id}"
+                <div id="msg-bubble-${m.id}" data-msg-id="${m.id}" data-msg-key="${msgKey}" data-sender-id="${m.sender_id}"
                      class="relative group flex justify-start items-end gap-2 transition-all duration-200"
                      ontouchstart="handleMsgTouchStart(event, '${m.id}', '${senderDisplayName}', '${safePreview}', false)"
                      ontouchmove="handleMsgTouchMove(event, this)"
@@ -1811,31 +1868,31 @@
         }
     }
 
+    function parseChatRow(row) {
+        if (!row || !row.text) return null;
+        const match = row.text.match(/^\[CHAT(?:\|mid:([^\]]+))?\]\s*([\s\S]*)$/);
+        if (!match) return null;
+        const customMid = match[1];
+        const cleanText = (match[2] || '').trim();
+        return {
+            id: customMid || row.id,
+            db_id: row.id,
+            sender_id: row.user_id,
+            text: cleanText,
+            created_at: row.created_at
+        };
+    }
+
     function appendOrUpdateMessage(m, options = { scroll: true, playSound: false, isIncoming: false }) {
         if (!m || !m.id) return;
         const list = document.getElementById('chatMessagesList');
         if (!list) return;
 
-        // If already rendered with exact ID, skip
+        // 1. Direct ID deduplication check
         if (renderedMsgIds.has(m.id) || document.getElementById(`msg-bubble-${m.id}`)) {
-            return;
-        }
-
-        // If it's a server message confirming a local optimistic bubble
-        if (!m.id.startsWith('local_')) {
-            const cleanText = (m.text || '').trim();
-            const localEl = Array.from(list.querySelectorAll('[data-msg-id^="local_"]')).find(el => {
-                const sId = el.dataset.senderId;
-                return sId === m.sender_id && el.innerText.includes(cleanText.substring(0, 20));
-            });
-
-            if (localEl) {
-                const oldId = localEl.dataset.msgId;
-                renderedMsgIds.delete(oldId);
-                renderedMsgIds.add(m.id);
-                localEl.id = `msg-bubble-${m.id}`;
-                localEl.dataset.msgId = m.id;
-                const statusIcon = localEl.querySelector('.msg-status-icon');
+            const existing = document.getElementById(`msg-bubble-${m.id}`);
+            if (existing) {
+                const statusIcon = existing.querySelector('.msg-status-icon');
                 if (statusIcon) {
                     statusIcon.innerHTML = `
                         <i data-lucide="sparkle" class="w-2.5 h-2.5"></i>
@@ -1843,8 +1900,26 @@
                     `;
                     lucide.createIcons();
                 }
-                return;
             }
+            return;
+        }
+
+        // 2. Exact content-key deduplication (prevents any duplicate bubbles)
+        const msgKey = `${m.sender_id}_${encodeURIComponent((m.text || '').substring(0, 30))}`;
+        const existingByKey = list.querySelector(`[data-msg-key="${msgKey}"]`);
+        if (existingByKey) {
+            renderedMsgIds.add(m.id);
+            existingByKey.id = `msg-bubble-${m.id}`;
+            existingByKey.dataset.msgId = m.id;
+            const statusIcon = existingByKey.querySelector('.msg-status-icon');
+            if (statusIcon) {
+                statusIcon.innerHTML = `
+                    <i data-lucide="sparkle" class="w-2.5 h-2.5"></i>
+                    <i data-lucide="sparkle" class="w-2.5 h-2.5 -ml-1"></i>
+                `;
+                lucide.createIcons();
+            }
+            return;
         }
 
         // Remove empty state placeholder if present
@@ -1876,19 +1951,14 @@
         try {
             const { data: chatPosts, error } = await sb.from('posts')
                 .select('*')
-                .ilike('text', '%[CHAT]%')
+                .ilike('text', '%[CHAT%')
                 .order('created_at', { ascending: true })
                 .limit(200);
 
             if (!error && chatPosts) {
                 const serverMessages = chatPosts
-                    .filter(p => p.text && p.text.includes('[CHAT]'))
-                    .map(p => ({
-                        id: p.id,
-                        sender_id: p.user_id,
-                        text: p.text.replace(/^\[CHAT\]\s*/, '').trim(),
-                        created_at: p.created_at
-                    }));
+                    .map(p => parseChatRow(p))
+                    .filter(Boolean);
 
                 // First time load: render full history once
                 if (!isInitialChatLoaded || list.children.length === 0) {
@@ -1915,9 +1985,7 @@
                 } else {
                     // Incremental update: append ONLY messages not already in DOM
                     serverMessages.forEach(m => {
-                        if (!renderedMsgIds.has(m.id)) {
-                            appendOrUpdateMessage(m, { scroll: true, playSound: false });
-                        }
+                        appendOrUpdateMessage(m, { scroll: false, playSound: false });
                     });
                 }
             }
@@ -1983,10 +2051,10 @@
             cancelReplyToMessage();
         }
 
-        // WhatsApp Instant Optimistic Bubble
-        const tempId = 'local_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+        // WhatsApp Instant Optimistic Bubble with deterministic global ID
+        const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
         const optimisticMsg = {
-            id: tempId,
+            id: msgId,
             sender_id: currentUser.id,
             text: payloadText,
             created_at: new Date().toISOString()
@@ -1997,14 +2065,15 @@
         try {
             const { data, error } = await sb.from('posts').insert({
                 user_id: currentUser.id,
-                text: `[CHAT] ${payloadText}`,
+                text: `[CHAT|mid:${msgId}] ${payloadText}`,
                 photo_url: null,
                 reactions: {}
             }).select();
 
             if (!error && data && data[0]) {
                 appendOrUpdateMessage({
-                    id: data[0].id,
+                    id: msgId,
+                    db_id: data[0].id,
                     sender_id: currentUser.id,
                     text: payloadText,
                     created_at: data[0].created_at
@@ -2014,13 +2083,13 @@
             console.warn('[ROAN] Chat insert error:', e);
         }
 
-        // Instant Broadcast to wake up partner's phone in 0ms (same as in aura-app)
+        // Instant Broadcast to wake up partner's phone in 0ms (with matching msgId!)
         try {
             realtimeChannelGlobal?.send({
                 type: 'broadcast',
                 event: 'new_message',
                 payload: {
-                    id: tempId,
+                    id: msgId,
                     sender_id: currentUser.id,
                     text: payloadText
                 }
@@ -2203,16 +2272,10 @@
             })
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, payload => {
                 const newRow = payload.new;
-                if (newRow && newRow.text && newRow.text.includes('[CHAT]')) {
-                    const cleanText = newRow.text.replace(/^\[CHAT\]\s*/, '').trim();
-                    const isFromMe = newRow.user_id === currentUser?.id;
-                    
-                    const incomingMsg = {
-                        id: newRow.id,
-                        sender_id: newRow.user_id,
-                        text: cleanText,
-                        created_at: newRow.created_at
-                    };
+                if (newRow && newRow.text && newRow.text.includes('[CHAT')) {
+                    const incomingMsg = parseChatRow(newRow);
+                    if (!incomingMsg) return;
+                    const isFromMe = incomingMsg.sender_id === currentUser?.id;
 
                     appendOrUpdateMessage(incomingMsg, {
                         scroll: true,
@@ -2222,10 +2285,10 @@
 
                     if (!isFromMe) {
                         hidePartnerTyping();
-                        const author = getProfile(newRow.user_id) || getPartnerProfile();
-                        const isAudio = cleanText.startsWith('[AUDIO');
-                        const isPhoto = cleanText.startsWith('[PHOTO]');
-                        let previewText = cleanText;
+                        const author = getProfile(incomingMsg.sender_id) || getPartnerProfile();
+                        const isAudio = incomingMsg.text.startsWith('[AUDIO');
+                        const isPhoto = incomingMsg.text.startsWith('[PHOTO]');
+                        let previewText = incomingMsg.text;
                         if (isAudio) previewText = '🎤 Mensaje de voz';
                         else if (isPhoto) previewText = '📸 Foto';
 
