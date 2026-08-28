@@ -1264,6 +1264,10 @@
         triggerHaptic();
         localStorage.removeItem('aura_chat_user');
         currentUser = null;
+        renderedMsgIds.clear();
+        isInitialChatLoaded = false;
+        const list = document.getElementById('chatMessagesList');
+        if (list) list.innerHTML = '';
         document.getElementById('mainApp').style.display = 'none';
         document.getElementById('authScreen').style.display = 'flex';
         toast('Sesión cerrada', 'info');
@@ -1387,13 +1391,15 @@
         closeDeleteMsgModal();
         triggerHaptic();
 
-        currentChatMessages = currentChatMessages.filter(m => m.id !== targetId);
-        localStorage.setItem('aura_chat_local', JSON.stringify(currentChatMessages.slice(-100)));
-        lastChatHash = '__FORCE_RERENDER__';
-        renderChatMessages();
+        const el = document.getElementById('msg-bubble-' + targetId);
+        if (el) {
+            el.style.opacity = '0';
+            el.style.transform = 'scale(0.85)';
+            setTimeout(() => el.remove(), 250);
+        }
+        renderedMsgIds.delete(targetId);
         toast('Mensaje eliminado', 'info');
 
-        try { await sb.from('messages').delete().eq('id', targetId); } catch(e) {}
         try { await sb.from('posts').delete().eq('id', targetId); } catch(e) {}
 
         try {
@@ -1517,64 +1523,295 @@
         document.getElementById('chatNormalInputContainer').classList.remove('hidden');
     }
 
-    /* ===== CHAT MESSAGES ENGINE ===== */
-    let _loadingChat = false;
+    /* ===== CHAT MESSAGES ENGINE (WHATSAPP-STYLE ZERO FLICKER) ===== */
+    const renderedMsgIds = new Set();
+    let isInitialChatLoaded = false;
+    let _syncingChat = false;
+
+    function renderSingleMessageHtml(m) {
+        if (!m || !m.text) return '';
+        const isMe = (m.sender_id === currentUser?.id || m.user_id === currentUser?.id || m.sender_id === 'me');
+        const partner = getPartnerProfile();
+        const msgDate = m.created_at ? new Date(m.created_at) : new Date();
+        const timeStr = isNaN(msgDate.getTime()) ? '' : msgDate.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+        let rawText = m.text || '';
+        let replyQuoteHtml = '';
+        const replyMatch = rawText.match(/^\[REPLY:([^|]+)\|([\s\S]*?)\]([\s\S]*)$/);
+        if (replyMatch) {
+            const qAuthor = replyMatch[1];
+            const qPreview = replyMatch[2];
+            rawText = replyMatch[3];
+            replyQuoteHtml = `
+                <div class="mb-1.5 p-1.5 px-2.5 rounded-xl text-[10.5px] ${isMe ? 'bg-white/20 text-white border-l-2 border-white' : 'bg-pink-500/10 dark:bg-orange-500/10 border-l-2 border-pink-500 dark:border-orange-400 text-neutral-800 dark:text-neutral-100'} backdrop-blur-sm shadow-xs space-y-0.5 select-none">
+                    <div class="flex items-center gap-1 font-bold text-[9.5px] ${isMe ? 'text-white' : 'text-pink-600 dark:text-orange-400'}">
+                        <i data-lucide="reply" class="w-2.5 h-2.5"></i>
+                        <span>${escapeHtml(qAuthor)}</span>
+                    </div>
+                    <p class="truncate opacity-85 text-[10px] leading-tight">${escapeHtml(qPreview)}</p>
+                </div>
+            `;
+        }
+
+        const isAudio = rawText && rawText.startsWith('[AUDIO');
+        const isPhoto = rawText && rawText.startsWith('[PHOTO]');
+        let contentHtml = '';
+        let previewSnippet = rawText;
+
+        if (isAudio) {
+            const match = rawText.match(/^\[AUDIO:?(\d+)?\](.*)$/);
+            const rawDuration = match && match[1] ? parseInt(match[1]) : 0;
+            const durationMins = Math.floor(rawDuration / 60);
+            const durationSecs = rawDuration % 60;
+            const durationStr = rawDuration > 0 ? `${durationMins}:${durationSecs < 10 ? '0' : ''}${durationSecs}` : '0:03';
+            const audioData = match ? match[2] : rawText.replace('[AUDIO]', '');
+            const audioKey = 'aud_' + (m.id || (Date.now() + '_' + Math.random().toString(36).substr(2, 5)));
+            window._cachedAudios[audioKey] = audioData;
+            previewSnippet = `Nota de voz (${durationStr})`;
+
+            contentHtml = `
+                ${replyQuoteHtml}
+                <div class="flex items-center gap-2 py-0.5">
+                    <button onclick="togglePlayVoiceNote(this, '${audioKey}')" class="w-7 h-7 rounded-full ${isMe ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-gradient-to-tr from-pink-500 to-rose-500 dark:from-orange-500 dark:to-amber-500 text-white'} flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all flex-shrink-0 shadow-sm" title="Reproducir">
+                        <i data-lucide="play" class="w-3.5 h-3.5 voice-play-icon ml-0.5"></i>
+                    </button>
+                    <div class="flex flex-col justify-center gap-0.5 min-w-[85px]">
+                        <div class="flex items-center gap-[2.5px] h-3 opacity-90">
+                            <span class="w-[2px] h-1.5 bg-current rounded-full"></span>
+                            <span class="w-[2px] h-3 bg-current rounded-full"></span>
+                            <span class="w-[2px] h-1.5 bg-current rounded-full"></span>
+                            <span class="w-[2px] h-3.5 bg-current rounded-full animate-pulse"></span>
+                            <span class="w-[2px] h-2.5 bg-current rounded-full"></span>
+                            <span class="w-[2px] h-3 bg-current rounded-full"></span>
+                            <span class="w-[2px] h-1.5 bg-current rounded-full"></span>
+                            <span class="w-[2px] h-2 bg-current rounded-full"></span>
+                        </div>
+                        <span class="text-[8.5px] ${isMe ? 'text-white/75' : 'opacity-55'} font-mono leading-none">${durationStr}</span>
+                    </div>
+                </div>
+            `;
+        } else if (isPhoto) {
+            const photoUrl = rawText.replace('[PHOTO]', '').trim();
+            previewSnippet = 'Foto adjunta';
+            contentHtml = `
+                ${replyQuoteHtml}
+                <div class="relative rounded-2xl overflow-hidden cursor-pointer shadow-md my-0.5 max-w-[260px] group/img" onclick="openChatPhotoLightbox('${photoUrl}')">
+                    <img src="${photoUrl}" class="w-full max-h-72 object-cover rounded-2xl group-hover/img:scale-103 transition-transform duration-300">
+                    <div class="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md text-[8.5px] text-white font-mono flex items-center gap-1 shadow-sm">
+                        <span>${timeStr}</span>
+                        ${isMe ? '<i data-lucide="check-check" class="w-3 h-3 text-white"></i>' : ''}
+                    </div>
+                </div>
+            `;
+        } else {
+            contentHtml = `
+                ${replyQuoteHtml}
+                <p class="text-xs sm:text-sm font-medium leading-relaxed break-words">${escapeHtml(rawText)}</p>
+            `;
+        }
+
+        const senderDisplayName = isMe ? 'Tú' : partner.name;
+        const safePreview = escapeHtml(previewSnippet.substring(0, 60));
+
+        let statusIconHtml = '';
+        if (isMe) {
+            const msgTime = new Date(m.created_at || 0).getTime();
+            const isRead = m.is_read || (lastPartnerReadTime && msgTime <= lastPartnerReadTime);
+            const isDelivered = m.id && !m.id.startsWith('local_');
+
+            if (isRead) {
+                statusIconHtml = `
+                    <span class="msg-status-icon flex items-center gap-0.5 text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.95)]" title="Leído por tu amor ✨">
+                        <i data-lucide="sparkles" class="w-3 h-3 fill-amber-300 animate-pulse"></i>
+                    </span>
+                `;
+            } else if (isDelivered) {
+                statusIconHtml = `
+                    <span class="msg-status-icon flex items-center gap-0.5 text-white/90" title="Entregado al dispositivo">
+                        <i data-lucide="sparkle" class="w-2.5 h-2.5"></i>
+                        <i data-lucide="sparkle" class="w-2.5 h-2.5 -ml-1"></i>
+                    </span>
+                `;
+            } else {
+                statusIconHtml = `
+                    <span class="msg-status-icon text-white/60" title="Enviando...">
+                        <i data-lucide="sparkle" class="w-2.5 h-2.5 animate-spin"></i>
+                    </span>
+                `;
+            }
+        }
+
+        if (isMe) {
+            return `
+                <div id="msg-bubble-${m.id}" data-msg-id="${m.id}" data-sender-id="${m.sender_id || currentUser.id}"
+                     class="relative group flex justify-end items-end gap-1.5 transition-all duration-200"
+                     ontouchstart="handleMsgTouchStart(event, '${m.id}', '${senderDisplayName}', '${safePreview}', true)"
+                     ontouchmove="handleMsgTouchMove(event, this)"
+                     ontouchend="handleMsgTouchEnd(event, this, '${m.id}', '${senderDisplayName}', '${safePreview}')">
+                    
+                    <div class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 pb-1">
+                        <button onclick="startReplyToMessage('${m.id}', '${senderDisplayName}', '${safePreview}')" class="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-pink-500 transition-colors cursor-pointer" title="Responder">
+                            <i data-lucide="reply" class="w-3.5 h-3.5"></i>
+                        </button>
+                        <button onclick="openDeleteMsgModal('${m.id}')" class="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-rose-500 transition-colors cursor-pointer" title="Eliminar mensaje">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+
+                    <div class="${isPhoto ? 'p-1 rounded-2xl rounded-br-sm' : (isAudio ? 'px-2.5 py-1.5 rounded-2xl rounded-br-sm' : 'px-3.5 py-2 rounded-2xl rounded-br-sm')} max-w-[82%] bg-gradient-to-tr from-pink-600 via-rose-500 to-pink-500 dark:from-orange-500 dark:via-orange-600 dark:to-amber-500 text-white shadow-md space-y-0.5">
+                        ${contentHtml}
+                        <div class="flex items-center justify-end gap-1.5 text-[8.5px] text-white/80 font-mono select-none pt-0.5">
+                            <span>${timeStr}</span>
+                            ${statusIconHtml}
+                        </div>
+                    </div>
+                </div>
+            `;
+        } else {
+            return `
+                <div id="msg-bubble-${m.id}" data-msg-id="${m.id}" data-sender-id="${m.sender_id}"
+                     class="relative group flex justify-start items-end gap-2 transition-all duration-200"
+                     ontouchstart="handleMsgTouchStart(event, '${m.id}', '${senderDisplayName}', '${safePreview}', false)"
+                     ontouchmove="handleMsgTouchMove(event, this)"
+                     ontouchend="handleMsgTouchEnd(event, this, '${m.id}', '${senderDisplayName}', '${safePreview}')">
+                    <img src="${partner.avatar_url}" class="w-6 h-6 rounded-full object-cover border border-pink-300 dark:border-orange-400 mb-1 flex-shrink-0 shadow-sm">
+                    <div class="${isPhoto ? 'p-1 rounded-2xl rounded-bl-sm' : (isAudio ? 'px-2.5 py-1.5 rounded-2xl rounded-bl-sm' : 'px-3.5 py-2 rounded-2xl rounded-bl-sm')} max-w-[82%] glass-card border border-pink-200/50 dark:border-orange-500/20 shadow-md space-y-0.5">
+                        ${contentHtml}
+                        ${!isPhoto ? `
+                        <div class="flex items-center justify-end text-[8.5px] opacity-50 font-mono">
+                            <span>${timeStr}</span>
+                        </div>
+                        ` : ''}
+                    </div>
+
+                    <div class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 pb-1">
+                        <button onclick="startReplyToMessage('${m.id}', '${senderDisplayName}', '${safePreview}')" class="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-pink-500 transition-colors cursor-pointer" title="Responder">
+                            <i data-lucide="reply" class="w-3.5 h-3.5"></i>
+                        </button>
+                        <button onclick="openDeleteMsgModal('${m.id}')" class="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-rose-500 transition-colors cursor-pointer" title="Eliminar mensaje">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    function appendOrUpdateMessage(m, options = { scroll: true, playSound: false, isIncoming: false }) {
+        if (!m || !m.id) return;
+        const list = document.getElementById('chatMessagesList');
+        if (!list) return;
+
+        // If already rendered with exact ID, skip
+        if (renderedMsgIds.has(m.id) || document.getElementById(`msg-bubble-${m.id}`)) {
+            return;
+        }
+
+        // If it's a server message confirming a local optimistic bubble
+        if (!m.id.startsWith('local_')) {
+            const cleanText = (m.text || '').trim();
+            const localEl = Array.from(list.querySelectorAll('[data-msg-id^="local_"]')).find(el => {
+                const sId = el.dataset.senderId;
+                return sId === m.sender_id && el.innerText.includes(cleanText.substring(0, 20));
+            });
+
+            if (localEl) {
+                const oldId = localEl.dataset.msgId;
+                renderedMsgIds.delete(oldId);
+                renderedMsgIds.add(m.id);
+                localEl.id = `msg-bubble-${m.id}`;
+                localEl.dataset.msgId = m.id;
+                const statusIcon = localEl.querySelector('.msg-status-icon');
+                if (statusIcon) {
+                    statusIcon.innerHTML = `
+                        <i data-lucide="sparkle" class="w-2.5 h-2.5"></i>
+                        <i data-lucide="sparkle" class="w-2.5 h-2.5 -ml-1"></i>
+                    `;
+                    lucide.createIcons();
+                }
+                return;
+            }
+        }
+
+        // Remove empty state placeholder if present
+        const emptyState = document.getElementById('chatEmptyState');
+        if (emptyState) emptyState.remove();
+
+        renderedMsgIds.add(m.id);
+        list.insertAdjacentHTML('beforeend', renderSingleMessageHtml(m));
+        lucide.createIcons();
+
+        if (options.scroll !== false) {
+            scrollChatToBottom(false);
+        }
+
+        if (options.playSound) {
+            playNotificationSound();
+            triggerHaptic(80);
+        }
+    }
 
     async function loadChatMessages() {
-        if (!currentUser || _loadingChat) return;
-        _loadingChat = true;
+        if (!currentUser) return;
+        const list = document.getElementById('chatMessagesList');
+        if (!list) return;
+
+        if (_syncingChat) return;
+        _syncingChat = true;
 
         try {
             const { data: chatPosts, error } = await sb.from('posts')
                 .select('*')
                 .ilike('text', '%[CHAT]%')
                 .order('created_at', { ascending: true })
-                .limit(300);
+                .limit(200);
 
-            if (error) {
-                console.warn('[ROAN] loadChatMessages DB error:', error.message);
-                _loadingChat = false;
-                return;
+            if (!error && chatPosts) {
+                const serverMessages = chatPosts
+                    .filter(p => p.text && p.text.includes('[CHAT]'))
+                    .map(p => ({
+                        id: p.id,
+                        sender_id: p.user_id,
+                        text: p.text.replace(/^\[CHAT\]\s*/, '').trim(),
+                        created_at: p.created_at
+                    }));
+
+                // First time load: render full history once
+                if (!isInitialChatLoaded || list.children.length === 0) {
+                    if (serverMessages.length === 0) {
+                        list.innerHTML = `
+                            <div id="chatEmptyState" class="text-center py-14 space-y-2">
+                                <div class="w-12 h-12 rounded-full mx-auto bg-pink-100 dark:bg-orange-950/60 text-pink-500 dark:text-orange-400 flex items-center justify-center text-2xl shadow-sm">💌</div>
+                                <p class="text-xs font-bold opacity-70">Aún no hay mensajes.</p>
+                                <p class="text-[10px] opacity-50">¡Escribe el primer mensaje de amor hoy!</p>
+                            </div>
+                        `;
+                    } else {
+                        renderedMsgIds.clear();
+                        let html = '';
+                        serverMessages.forEach(m => {
+                            renderedMsgIds.add(m.id);
+                            html += renderSingleMessageHtml(m);
+                        });
+                        list.innerHTML = html;
+                        lucide.createIcons();
+                        scrollChatToBottom(true);
+                    }
+                    isInitialChatLoaded = true;
+                } else {
+                    // Incremental update: append ONLY messages not already in DOM
+                    serverMessages.forEach(m => {
+                        if (!renderedMsgIds.has(m.id)) {
+                            appendOrUpdateMessage(m, { scroll: true, playSound: false });
+                        }
+                    });
+                }
             }
-
-            // Server messages are the SINGLE SOURCE OF TRUTH
-            const serverMessages = (chatPosts || [])
-                .filter(p => p.text && p.text.includes('[CHAT]'))
-                .map(p => ({
-                    id: p.id,
-                    sender_id: p.user_id,
-                    text: p.text.replace(/^\[CHAT\]\s*/, '').trim(),
-                    created_at: p.created_at
-                }));
-
-            // Collect server IDs for quick lookup
-            const serverIds = new Set(serverMessages.map(m => m.id));
-
-            // Keep only local_ temp messages that DON'T have a server counterpart yet
-            const pendingLocalMsgs = currentChatMessages.filter(m => {
-                if (!m.id || !m.id.startsWith('local_')) return false;
-                // Check if server already has this message (by matching sender + text)
-                const hasServerVersion = serverMessages.some(sm =>
-                    sm.sender_id === m.sender_id &&
-                    sm.text === m.text
-                );
-                return !hasServerVersion;
-            });
-
-            // Final list: all server messages + pending local messages, sorted by time
-            const allMessages = [...serverMessages, ...pendingLocalMsgs]
-                .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
-
-            currentChatMessages = allMessages;
-            localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
-            lastChatHash = '__FORCE_RERENDER__';
-            renderChatMessages();
-
         } catch(e) {
-            console.warn('[ROAN] loadChatMessages exception:', e);
+            console.warn('[ROAN] loadChatMessages error:', e);
         }
 
-        _loadingChat = false;
+        _syncingChat = false;
 
         if (!document.hidden && currentUser) {
             try {
@@ -1587,209 +1824,15 @@
         }
     }
 
-    function renderChatMessages() {
-        const list = document.getElementById('chatMessagesList');
-        if (!list) return;
-
-        const newHash = (currentChatMessages && currentChatMessages.length > 0) 
-            ? currentChatMessages.map(m => (m.id || '') + (m.text || '')).join('|')
-            : '__EMPTY__';
-
-        if (newHash === lastChatHash) return;
-        lastChatHash = newHash;
-
-        if (!currentChatMessages || currentChatMessages.length === 0) {
-            list.innerHTML = `
-                <div class="text-center py-14 space-y-2">
-                    <div class="w-12 h-12 rounded-full mx-auto bg-pink-100 dark:bg-orange-950/60 text-pink-500 dark:text-orange-400 flex items-center justify-center text-2xl shadow-sm">💌</div>
-                    <p class="text-xs font-bold opacity-70">Aún no hay mensajes.</p>
-                    <p class="text-[10px] opacity-50">¡Escribe el primer mensaje de amor hoy!</p>
-                </div>
-            `;
-            return;
-        }
-
-        const partner = getPartnerProfile();
-        let html = '';
-
-        currentChatMessages.forEach(m => {
-            try {
-                const isMe = (m.sender_id === currentUser.id || m.user_id === currentUser.id || m.sender_id === 'me');
-                const msgDate = m.created_at ? new Date(m.created_at) : new Date();
-                const timeStr = isNaN(msgDate.getTime()) ? '' : msgDate.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true });
-
-                let rawText = m.text || '';
-                let replyQuoteHtml = '';
-                const replyMatch = rawText.match(/^\[REPLY:([^|]+)\|([\s\S]*?)\]([\s\S]*)$/);
-                if (replyMatch) {
-                    const qAuthor = replyMatch[1];
-                    const qPreview = replyMatch[2];
-                    rawText = replyMatch[3];
-                    replyQuoteHtml = `
-                        <div class="mb-1.5 p-1.5 px-2.5 rounded-xl text-[10.5px] ${isMe ? 'bg-white/20 text-white border-l-2 border-white' : 'bg-pink-500/10 dark:bg-orange-500/10 border-l-2 border-pink-500 dark:border-orange-400 text-neutral-800 dark:text-neutral-100'} backdrop-blur-sm shadow-xs space-y-0.5 select-none">
-                            <div class="flex items-center gap-1 font-bold text-[9.5px] ${isMe ? 'text-white' : 'text-pink-600 dark:text-orange-400'}">
-                                <i data-lucide="reply" class="w-2.5 h-2.5"></i>
-                                <span>${escapeHtml(qAuthor)}</span>
-                            </div>
-                            <p class="truncate opacity-85 text-[10px] leading-tight">${escapeHtml(qPreview)}</p>
-                        </div>
-                    `;
-                }
-
-                const isAudio = rawText && rawText.startsWith('[AUDIO');
-                const isPhoto = rawText && rawText.startsWith('[PHOTO]');
-                let contentHtml = '';
-                let previewSnippet = rawText;
-
-                if (isAudio) {
-                    const match = rawText.match(/^\[AUDIO:?(\d+)?\](.*)$/);
-                    const rawDuration = match && match[1] ? parseInt(match[1]) : 0;
-                    const durationMins = Math.floor(rawDuration / 60);
-                    const durationSecs = rawDuration % 60;
-                    const durationStr = rawDuration > 0 ? `${durationMins}:${durationSecs < 10 ? '0' : ''}${durationSecs}` : '0:03';
-                    const audioData = match ? match[2] : rawText.replace('[AUDIO]', '');
-                    const audioKey = 'aud_' + (m.id || (Date.now() + '_' + Math.random().toString(36).substr(2, 5)));
-                    window._cachedAudios[audioKey] = audioData;
-                    previewSnippet = `Nota de voz (${durationStr})`;
-
-                    contentHtml = `
-                        ${replyQuoteHtml}
-                        <div class="flex items-center gap-2 py-0.5">
-                            <button onclick="togglePlayVoiceNote(this, '${audioKey}')" class="w-7 h-7 rounded-full ${isMe ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-gradient-to-tr from-pink-500 to-rose-500 dark:from-orange-500 dark:to-amber-500 text-white'} flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all flex-shrink-0 shadow-sm" title="Reproducir">
-                                <i data-lucide="play" class="w-3.5 h-3.5 voice-play-icon ml-0.5"></i>
-                            </button>
-                            <div class="flex flex-col justify-center gap-0.5 min-w-[85px]">
-                                <div class="flex items-center gap-[2.5px] h-3 opacity-90">
-                                    <span class="w-[2px] h-1.5 bg-current rounded-full"></span>
-                                    <span class="w-[2px] h-3 bg-current rounded-full"></span>
-                                    <span class="w-[2px] h-1.5 bg-current rounded-full"></span>
-                                    <span class="w-[2px] h-3.5 bg-current rounded-full animate-pulse"></span>
-                                    <span class="w-[2px] h-2.5 bg-current rounded-full"></span>
-                                    <span class="w-[2px] h-3 bg-current rounded-full"></span>
-                                    <span class="w-[2px] h-1.5 bg-current rounded-full"></span>
-                                    <span class="w-[2px] h-2 bg-current rounded-full"></span>
-                                </div>
-                                <span class="text-[8.5px] ${isMe ? 'text-white/75' : 'opacity-55'} font-mono leading-none">${durationStr}</span>
-                            </div>
-                        </div>
-                    `;
-                } else if (isPhoto) {
-                    const photoUrl = rawText.replace('[PHOTO]', '').trim();
-                    previewSnippet = 'Foto adjunta';
-                    contentHtml = `
-                        ${replyQuoteHtml}
-                        <div class="relative rounded-2xl overflow-hidden cursor-pointer shadow-md my-0.5 max-w-[260px] group/img" onclick="openChatPhotoLightbox('${photoUrl}')">
-                            <img src="${photoUrl}" class="w-full max-h-72 object-cover rounded-2xl group-hover/img:scale-103 transition-transform duration-300">
-                            <div class="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md text-[8.5px] text-white font-mono flex items-center gap-1 shadow-sm">
-                                <span>${timeStr}</span>
-                                ${isMe ? '<i data-lucide="check-check" class="w-3 h-3 text-white"></i>' : ''}
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    contentHtml = `
-                        ${replyQuoteHtml}
-                        <p class="text-xs sm:text-sm font-medium leading-relaxed break-words">${escapeHtml(rawText)}</p>
-                    `;
-                }
-
-                const senderDisplayName = isMe ? 'Tú' : partner.name;
-                const safePreview = escapeHtml(previewSnippet.substring(0, 60));
-
-                let statusIconHtml = '';
-                if (isMe) {
-                    const msgTime = new Date(m.created_at || 0).getTime();
-                    const isRead = m.is_read || (lastPartnerReadTime && msgTime <= lastPartnerReadTime);
-                    const isDelivered = m.id && !m.id.startsWith('local_');
-
-                    if (isRead) {
-                        statusIconHtml = `
-                            <span class="flex items-center gap-0.5 text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.95)]" title="Leído por tu amor ✨">
-                                <i data-lucide="sparkles" class="w-3 h-3 fill-amber-300 animate-pulse"></i>
-                            </span>
-                        `;
-                    } else if (isDelivered) {
-                        statusIconHtml = `
-                            <span class="flex items-center gap-0.5 text-white/90" title="Entregado al dispositivo">
-                                <i data-lucide="sparkle" class="w-2.5 h-2.5"></i>
-                                <i data-lucide="sparkle" class="w-2.5 h-2.5 -ml-1"></i>
-                            </span>
-                        `;
-                    } else {
-                        statusIconHtml = `
-                            <span class="text-white/60" title="Enviado a la nube">
-                                <i data-lucide="sparkle" class="w-2.5 h-2.5"></i>
-                            </span>
-                        `;
-                    }
-                }
-
-                if (isMe) {
-                    html += `
-                        <div class="relative group flex justify-end items-end gap-1.5"
-                             ontouchstart="handleMsgTouchStart(event, '${m.id}', '${senderDisplayName}', '${safePreview}', true)"
-                             ontouchmove="handleMsgTouchMove(event, this)"
-                             ontouchend="handleMsgTouchEnd(event, this, '${m.id}', '${senderDisplayName}', '${safePreview}')">
-                            
-                            <div class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 pb-1">
-                                <button onclick="startReplyToMessage('${m.id}', '${senderDisplayName}', '${safePreview}')" class="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-pink-500 transition-colors cursor-pointer" title="Responder">
-                                    <i data-lucide="reply" class="w-3.5 h-3.5"></i>
-                                </button>
-                                <button onclick="openDeleteMsgModal('${m.id}')" class="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-rose-500 transition-colors cursor-pointer" title="Eliminar mensaje">
-                                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-                                </button>
-                            </div>
-
-                            <div class="${isPhoto ? 'p-1 rounded-2xl rounded-br-sm' : (isAudio ? 'px-2.5 py-1.5 rounded-2xl rounded-br-sm' : 'px-3.5 py-2 rounded-2xl rounded-br-sm')} max-w-[82%] bg-gradient-to-tr from-pink-600 via-rose-500 to-pink-500 dark:from-orange-500 dark:via-orange-600 dark:to-amber-500 text-white shadow-md space-y-0.5">
-                                ${contentHtml}
-                                <div class="flex items-center justify-end gap-1.5 text-[8.5px] text-white/80 font-mono select-none pt-0.5">
-                                    <span>${timeStr}</span>
-                                    ${statusIconHtml}
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    html += `
-                        <div class="relative group flex justify-start items-end gap-2"
-                             ontouchstart="handleMsgTouchStart(event, '${m.id}', '${senderDisplayName}', '${safePreview}', false)"
-                             ontouchmove="handleMsgTouchMove(event, this)"
-                             ontouchend="handleMsgTouchEnd(event, this, '${m.id}', '${senderDisplayName}', '${safePreview}')">
-                            <img src="${partner.avatar_url}" class="w-6 h-6 rounded-full object-cover border border-pink-300 dark:border-orange-400 mb-1 flex-shrink-0 shadow-sm">
-                            <div class="${isPhoto ? 'p-1 rounded-2xl rounded-bl-sm' : (isAudio ? 'px-2.5 py-1.5 rounded-2xl rounded-bl-sm' : 'px-3.5 py-2 rounded-2xl rounded-bl-sm')} max-w-[82%] glass-card border border-pink-200/50 dark:border-orange-500/20 shadow-md space-y-0.5">
-                                ${contentHtml}
-                                ${!isPhoto ? `
-                                <div class="flex items-center justify-end text-[8.5px] opacity-50 font-mono">
-                                    <span>${timeStr}</span>
-                                </div>
-                                ` : ''}
-                            </div>
-
-                            <div class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 pb-1">
-                                <button onclick="startReplyToMessage('${m.id}', '${senderDisplayName}', '${safePreview}')" class="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-pink-500 transition-colors cursor-pointer" title="Responder">
-                                    <i data-lucide="reply" class="w-3.5 h-3.5"></i>
-                                </button>
-                                <button onclick="openDeleteMsgModal('${m.id}')" class="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-rose-500 transition-colors cursor-pointer" title="Eliminar mensaje">
-                                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-                                </button>
-                            </div>
-                        </div>
-                    `;
-                }
-            } catch(msgErr) {}
-        });
-
-        list.innerHTML = html;
-        lucide.createIcons();
-        scrollChatToBottom(false);
-    }
-
     function scrollChatToBottom(forceInstant = false) {
         const list = document.getElementById('chatMessagesList');
         if (!list) return;
-        if (forceInstant) list.scrollTop = list.scrollHeight;
-        else list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
-        setTimeout(() => { if (list) list.scrollTop = list.scrollHeight; }, 150);
+        if (forceInstant) {
+            list.scrollTop = list.scrollHeight;
+        } else {
+            list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
+        }
+        setTimeout(() => { if (list) list.scrollTop = list.scrollHeight; }, 100);
     }
 
     function insertChatEmoji(emoji) {
@@ -1826,31 +1869,36 @@
             cancelReplyToMessage();
         }
 
-        const tempMsg = {
-            id: 'local_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        // WhatsApp Instant Optimistic Bubble
+        const tempId = 'local_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+        const optimisticMsg = {
+            id: tempId,
             sender_id: currentUser.id,
             text: payloadText,
             created_at: new Date().toISOString()
         };
 
-        currentChatMessages.push(tempMsg);
-        localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
-        renderChatMessages();
+        appendOrUpdateMessage(optimisticMsg, { scroll: true, playSound: false });
 
         try {
-            await sb.from('posts').insert({
+            const { data, error } = await sb.from('posts').insert({
                 user_id: currentUser.id,
                 text: `[CHAT] ${payloadText}`,
                 photo_url: null,
                 reactions: {}
-            });
-        } catch(e) {
-            console.warn('Chat insert error:', e);
-        }
+            }).select();
 
-        // The postgres_changes listener will auto-render the confirmed message.
-        // This reload is just a safety net.
-        setTimeout(() => loadChatMessages(), 300);
+            if (!error && data && data[0]) {
+                appendOrUpdateMessage({
+                    id: data[0].id,
+                    sender_id: currentUser.id,
+                    text: payloadText,
+                    created_at: data[0].created_at
+                }, { scroll: false });
+            }
+        } catch(e) {
+            console.warn('[ROAN] Chat insert error:', e);
+        }
     }
 
     async function handleSendChatImage(e) {
@@ -1868,39 +1916,45 @@
             };
             reader.readAsDataURL(file);
         } catch(err) {
-            toast('Error al enviar la imagen', 'error');
+            toast('Error al procesar foto', 'error');
         }
         e.target.value = '';
     }
 
     function handleChatTypingInput() {
         const now = Date.now();
-        if (now - lastTypingBroadcast > 3000) {
+        if (now - lastTypingBroadcast > 2000) {
             lastTypingBroadcast = now;
-            try {
-                realtimeChannelGlobal?.send({
-                    type: 'broadcast',
-                    event: 'typing',
-                    payload: { user_id: currentUser.id, name: currentUser.name }
-                });
-            } catch(e) {}
+            realtimeChannelGlobal?.send({
+                type: 'broadcast',
+                event: 'typing',
+                payload: { user_id: currentUser?.id, name: currentUser?.name }
+            });
         }
     }
 
-    function showPartnerTyping(partnerName) {
-        const statusEl = document.getElementById('chatPartnerStatus');
-        if (!statusEl) return;
-        statusEl.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-pink-500 dark:bg-orange-400 animate-ping"></span> <span class="text-pink-600 dark:text-orange-400 font-bold">escribiendo...</span>`;
-
+    function showPartnerTyping(name) {
+        const headerStatus = document.getElementById('chatPartnerStatus');
+        if (headerStatus) {
+            headerStatus.innerText = 'Escribiendo amor...';
+            headerStatus.classList.add('text-pink-600', 'dark:text-orange-400', 'font-bold');
+        }
         if (partnerTypingResetTimeout) clearTimeout(partnerTypingResetTimeout);
-        partnerTypingResetTimeout = setTimeout(() => {
-            statusEl.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Chat Íntimo & Privado`;
-        }, 3500);
+        partnerTypingResetTimeout = setTimeout(() => hidePartnerTyping(), 3500);
     }
 
-    function escapeHtml(text) {
+    function hidePartnerTyping() {
+        const headerStatus = document.getElementById('chatPartnerStatus');
+        if (headerStatus) {
+            headerStatus.innerText = 'En línea';
+            headerStatus.classList.remove('text-pink-600', 'dark:text-orange-400', 'font-bold');
+        }
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
         const div = document.createElement('div');
-        div.innerText = text || '';
+        div.textContent = str;
         return div.innerHTML;
     }
 
@@ -1916,13 +1970,10 @@
 
         realtimeChannelGlobal
             .on('broadcast', { event: 'typing' }, payload => {
-                if (payload.payload && payload.payload.user_id !== currentUser.id) {
+                if (payload.payload && payload.payload.user_id !== currentUser?.id) {
                     showPartnerTyping(payload.payload.name || 'Tu pareja');
                 }
             })
-            /* NOTE: broadcast new_message REMOVED - diagnostic proved it NEVER fires.
-               Messages are delivered ONLY via postgres_changes INSERT on posts table,
-               which IS confirmed working. */
             .on('broadcast', { event: 'call_offer' }, payload => {
                 if (payload.payload) handleIncomingCallOffer(payload.payload);
             })
@@ -1954,27 +2005,37 @@
                 if (payload.payload && payload.payload.reader_id !== currentUser?.id) {
                     lastPartnerReadTime = payload.payload.read_at || Date.now();
                     localStorage.setItem('roan_last_read_time', lastPartnerReadTime);
-                    lastChatHash = '__FORCE_RERENDER__';
-                    renderChatMessages();
+                    // Update all outgoing messages status icons directly in DOM without re-rendering!
+                    document.querySelectorAll('.msg-status-icon').forEach(icon => {
+                        icon.className = 'msg-status-icon flex items-center gap-0.5 text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.95)]';
+                        icon.innerHTML = '<i data-lucide="sparkles" class="w-3 h-3 fill-amber-300 animate-pulse"></i>';
+                    });
+                    lucide.createIcons();
                 }
             })
             .on('broadcast', { event: 'delete_message' }, payload => {
                 const targetId = payload.payload?.id;
                 if (targetId) {
-                    currentChatMessages = currentChatMessages.filter(m => m.id !== targetId);
-                    localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
-                    lastChatHash = '__FORCE_RERENDER__';
-                    renderChatMessages();
+                    const el = document.getElementById('msg-bubble-' + targetId);
+                    if (el) {
+                        el.style.opacity = '0';
+                        el.style.transform = 'scale(0.85)';
+                        setTimeout(() => el.remove(), 250);
+                    }
+                    renderedMsgIds.delete(targetId);
                 }
             })
-            /* === PRIMARY MESSAGE DELIVERY: postgres_changes on posts table === */
+            /* === PRIMARY REALTIME MESSAGE DELIVERY === */
             .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'posts' }, payload => {
                 const targetId = payload.old?.id;
                 if (targetId) {
-                    currentChatMessages = currentChatMessages.filter(m => m.id !== targetId);
-                    localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
-                    lastChatHash = '__FORCE_RERENDER__';
-                    renderChatMessages();
+                    const el = document.getElementById('msg-bubble-' + targetId);
+                    if (el) {
+                        el.style.opacity = '0';
+                        el.style.transform = 'scale(0.85)';
+                        setTimeout(() => el.remove(), 250);
+                    }
+                    renderedMsgIds.delete(targetId);
                 }
             })
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, payload => {
@@ -1990,26 +2051,11 @@
                         created_at: newRow.created_at
                     };
 
-                    // Deduplicate: replace local_ temp message or skip if already present
-                    const localIdx = currentChatMessages.findIndex(m => 
-                        m.id && m.id.startsWith('local_') && 
-                        m.sender_id === incomingMsg.sender_id && 
-                        m.text === incomingMsg.text
-                    );
-                    
-                    if (localIdx >= 0) {
-                        // Replace temp local message with real server message
-                        currentChatMessages[localIdx] = incomingMsg;
-                    } else {
-                        const alreadyExists = currentChatMessages.some(m => m.id === incomingMsg.id);
-                        if (!alreadyExists) {
-                            currentChatMessages.push(incomingMsg);
-                        }
-                    }
-                    
-                    localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
-                    lastChatHash = '__FORCE_RERENDER__';
-                    renderChatMessages();
+                    appendOrUpdateMessage(incomingMsg, {
+                        scroll: true,
+                        playSound: !isFromMe,
+                        isIncoming: !isFromMe
+                    });
 
                     if (!isFromMe) {
                         hidePartnerTyping();
@@ -2019,9 +2065,6 @@
                         let previewText = cleanText;
                         if (isAudio) previewText = '🎤 Mensaje de voz';
                         else if (isPhoto) previewText = '📸 Foto';
-
-                        playNotificationSound();
-                        triggerHaptic(80);
 
                         if (document.hidden) {
                             sendNativeNotification(author.name, previewText, author.avatar_url);
@@ -2048,27 +2091,27 @@
                     const partner = getPartnerProfile();
                     document.getElementById('chatPartnerName').innerText = partner.name;
                     document.getElementById('chatPartnerAvatar').src = partner.avatar_url;
-                    lastChatHash = '__FORCE_RERENDER__';
-                    renderChatMessages();
                 }
             })
             .subscribe((status) => {
                 console.log('[ROAN] Realtime channel status:', status);
+                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                    setTimeout(() => setupRealtime(), 3000);
+                }
             });
 
-        // Visibility change: reload on focus
+        // Visibility change: sync on focus
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') loadChatMessages();
         });
 
-        // FALLBACK POLLING: every 4 seconds, silently check for new messages
-        // This catches anything postgres_changes might miss (reconnections, etc.)
+        // Background sync: every 5 seconds, append any missing messages without wiping DOM
         if (chatPollingInterval) clearInterval(chatPollingInterval);
         chatPollingInterval = setInterval(() => {
             if (!document.hidden && currentUser) {
                 loadChatMessages();
             }
-        }, 4000);
+        }, 5000);
     }
 
     /* ===== INIT ===== */
