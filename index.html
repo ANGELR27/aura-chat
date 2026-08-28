@@ -543,6 +543,7 @@
     let pendingDeleteMsgId = null;
     let touchStartX = 0;
     let touchStartY = 0;
+    let lastPartnerReadTime = parseInt(localStorage.getItem('roan_last_read_time') || '0');
 
     // Audio Voice Note state
     let chatMediaRecorder = null;
@@ -1461,6 +1462,16 @@
         currentChatMessages = finalMessages;
         localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
         renderChatMessages();
+
+        if (!document.hidden && currentUser) {
+            try {
+                realtimeChannelGlobal?.send({
+                    type: 'broadcast',
+                    event: 'messages_read',
+                    payload: { reader_id: currentUser.id, read_at: Date.now() }
+                });
+            } catch(e) {}
+        }
     }
 
     function renderChatMessages() {
@@ -1572,6 +1583,34 @@
                 const senderDisplayName = isMe ? 'Tú' : partner.name;
                 const safePreview = escapeHtml(previewSnippet.substring(0, 60));
 
+                let statusIconHtml = '';
+                if (isMe) {
+                    const msgTime = new Date(m.created_at || 0).getTime();
+                    const isRead = m.is_read || (lastPartnerReadTime && msgTime <= lastPartnerReadTime);
+                    const isDelivered = m.id && !m.id.startsWith('local_');
+
+                    if (isRead) {
+                        statusIconHtml = `
+                            <span class="flex items-center gap-0.5 text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.95)]" title="Leído por tu amor ✨">
+                                <i data-lucide="sparkles" class="w-3 h-3 fill-amber-300 animate-pulse"></i>
+                            </span>
+                        `;
+                    } else if (isDelivered) {
+                        statusIconHtml = `
+                            <span class="flex items-center gap-0.5 text-white/90" title="Entregado al dispositivo">
+                                <i data-lucide="sparkle" class="w-2.5 h-2.5"></i>
+                                <i data-lucide="sparkle" class="w-2.5 h-2.5 -ml-1"></i>
+                            </span>
+                        `;
+                    } else {
+                        statusIconHtml = `
+                            <span class="text-white/60" title="Enviado a la nube">
+                                <i data-lucide="sparkle" class="w-2.5 h-2.5"></i>
+                            </span>
+                        `;
+                    }
+                }
+
                 if (isMe) {
                     html += `
                         <div class="relative group flex justify-end items-end gap-1.5 animate-slide-up"
@@ -1590,12 +1629,10 @@
 
                             <div class="${isPhoto ? 'p-1 rounded-2xl rounded-br-sm' : (isAudio ? 'px-2.5 py-1.5 rounded-2xl rounded-br-sm' : 'px-3.5 py-2 rounded-2xl rounded-br-sm')} max-w-[82%] bg-gradient-to-tr from-pink-600 via-rose-500 to-pink-500 dark:from-orange-500 dark:via-orange-600 dark:to-amber-500 text-white shadow-md space-y-0.5">
                                 ${contentHtml}
-                                ${!isPhoto ? `
-                                <div class="flex items-center justify-end gap-1 text-[8.5px] text-white/80 font-mono">
+                                <div class="flex items-center justify-end gap-1.5 text-[8.5px] text-white/80 font-mono select-none pt-0.5">
                                     <span>${timeStr}</span>
-                                    <i data-lucide="check-check" class="w-3 h-3"></i>
+                                    ${statusIconHtml}
                                 </div>
-                                ` : ''}
                             </div>
                         </div>
                     `;
@@ -1841,6 +1878,14 @@
                 stopAllCallSounds();
                 endActiveCall(false);
                 toast(payload.payload?.reason === 'busy' ? 'Línea ocupada' : 'Llamada rechazada', 'info');
+            })
+            .on('broadcast', { event: 'messages_read' }, payload => {
+                if (payload.payload && payload.payload.reader_id !== currentUser?.id) {
+                    lastPartnerReadTime = payload.payload.read_at || Date.now();
+                    localStorage.setItem('roan_last_read_time', lastPartnerReadTime);
+                    lastChatHash = '__FORCE_RERENDER__';
+                    renderChatMessages();
+                }
             })
             .on('broadcast', { event: 'delete_message' }, payload => {
                 const targetId = payload.payload?.id;
