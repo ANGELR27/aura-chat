@@ -2,6 +2,7 @@ import os, glob, shutil
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 def create_roan_app_icon(size):
+    # Base transparent canvas
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     
     # 1. Obsidian Matte Black Squircle with subtle luxury gradient
@@ -11,9 +12,9 @@ def create_roan_app_icon(size):
     
     for y in range(size):
         ratio = y / size
-        r = int(22 - ratio * 14)
-        g = int(21 - ratio * 14)
-        b = int(28 - ratio * 18)
+        r = int(24 - ratio * 14)
+        g = int(23 - ratio * 14)
+        b = int(30 - ratio * 18)
         bg_draw.line([(0, y), (size, y)], fill=(r, g, b, 255))
     
     mask = Image.new("L", (size, size), 0)
@@ -23,15 +24,15 @@ def create_roan_app_icon(size):
     img = Image.composite(bg, img, mask)
     draw = ImageDraw.Draw(img)
     
-    # 2. Subtle White Light Glow
+    # 2. Subtle White Light Glow Vignette (Top-Right / Center light flare)
     glow_canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     glow_draw = ImageDraw.Draw(glow_canvas)
     
-    center_x = int(size * 0.75)
-    center_y = int(size * 0.22)
-    max_r = int(size * 0.45)
+    center_x = int(size * 0.72)
+    center_y = int(size * 0.25)
+    max_r = int(size * 0.40)
     for i in range(max_r, 0, -4):
-        alpha = int(45 * (1 - i / max_r) ** 1.8)
+        alpha = int(40 * (1 - i / max_r) ** 1.8)
         glow_draw.ellipse(
             [(center_x - i, center_y - i), (center_x + i, center_y + i)],
             fill=(255, 255, 255, alpha)
@@ -40,17 +41,18 @@ def create_roan_app_icon(size):
     img = Image.alpha_composite(img, glow_canvas)
     draw = ImageDraw.Draw(img)
     
-    # 3. Sleek border
+    # 3. Sleek border with subtle highlight
     border_w = max(2, int(size * 0.022))
     draw.rounded_rectangle(
         [(border_w // 2, border_w // 2), (size - 1 - border_w // 2, size - 1 - border_w // 2)],
         radius=radius - 1,
-        outline=(255, 255, 255, 60),
+        outline=(255, 255, 255, 55),
         width=border_w
     )
     
-    # 4. Premium ROAN Typography
-    font_size = int(size * 0.24)
+    # 4. Premium ROAN Typography (SCALED FOR ANDROID ADAPTIVE SAFE AREA)
+    # Target safe width: <= 58% of icon size
+    font_size = int(size * 0.165)
     font = None
     font_names = ["timesbd.ttf", "georgiab.ttf", "timesbi.ttf", "georgiaz.ttf", "arialbd.ttf"]
     for fn in font_names:
@@ -69,39 +71,42 @@ def create_roan_app_icon(size):
         bbox = draw.textbbox((0, 0), l, font=font)
         letter_widths.append((bbox[2] - bbox[0], bbox[3] - bbox[1], bbox))
         
-    spacing = int(size * 0.04)
+    spacing = int(size * 0.028)
     total_w = sum(w for w, h, b in letter_widths) + spacing * (len(letters) - 1)
     start_x = (size - total_w) // 2
-    base_y = int(size * 0.44)
+    base_y = int(size * 0.43)
     
-    # Glow text
+    # Text glow layer
     text_glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     glow_t_draw = ImageDraw.Draw(text_glow)
     
     curr_x = start_x
     for i, l in enumerate(letters):
         w, h, bbox = letter_widths[i]
-        glow_t_draw.text((curr_x - bbox[0], base_y - bbox[1]), l, font=font, fill=(255, 255, 255, 200))
+        glow_t_draw.text((curr_x - bbox[0], base_y - bbox[1]), l, font=font, fill=(255, 255, 255, 180))
         curr_x += w + spacing
         
-    text_glow = text_glow.filter(ImageFilter.GaussianBlur(radius=max(2, int(size * 0.025))))
+    text_glow = text_glow.filter(ImageFilter.GaussianBlur(radius=max(2, int(size * 0.02))))
     img = Image.alpha_composite(img, text_glow)
     draw = ImageDraw.Draw(img)
     
-    # Draw letters
+    # Draw Crisp Platinum White Text
     curr_x = start_x
     for i, l in enumerate(letters):
         w, h, bbox = letter_widths[i]
         y_pos = base_y - bbox[1]
         x_pos = curr_x - bbox[0]
         
-        draw.text((x_pos, y_pos + max(1, int(size*0.015))), l, font=font, fill=(0, 0, 0, 200))
+        # Soft drop shadow
+        draw.text((x_pos, y_pos + max(1, int(size*0.012))), l, font=font, fill=(0, 0, 0, 220))
+        # Main pure white
         draw.text((x_pos, y_pos), l, font=font, fill=(255, 255, 255, 255))
         
+        # Custom Luxury Flourishes on 'R' and 'A':
         if l == "R":
             star_cx = x_pos + int(w * 0.22)
             star_cy = y_pos + int(h * 0.08)
-            star_r = max(2, int(size * 0.012))
+            star_r = max(2, int(size * 0.009))
             draw.polygon([
                 (star_cx, star_cy - star_r),
                 (star_cx + int(star_r*0.4), star_cy),
@@ -112,7 +117,7 @@ def create_roan_app_icon(size):
         elif l == "A":
             star_cx = x_pos + int(w * 0.5)
             star_cy = y_pos + int(h * 0.58)
-            star_r = max(2, int(size * 0.012))
+            star_r = max(2, int(size * 0.009))
             draw.polygon([
                 (star_cx, star_cy - star_r),
                 (star_cx + int(star_r*0.4), star_cy),
@@ -122,8 +127,8 @@ def create_roan_app_icon(size):
             
         curr_x += w + spacing
 
-    # 5. Subtitle
-    sub_font_size = int(size * 0.065)
+    # 5. Subtitle: 'ÁNGEL & ROXANA' scaled within safe zone
+    sub_font_size = int(size * 0.048)
     try:
         sub_font = ImageFont.truetype("arialbd.ttf", sub_font_size)
     except:
@@ -133,12 +138,14 @@ def create_roan_app_icon(size):
     sub_bbox = draw.textbbox((0, 0), sub_text, font=sub_font)
     sub_w = sub_bbox[2] - sub_bbox[0]
     sub_x = (size - sub_w) // 2 - sub_bbox[0]
-    sub_y = int(size * 0.72)
+    sub_y = int(size * 0.65)
     
-    draw.text((sub_x, sub_y), sub_text, font=sub_font, fill=(200, 205, 215, 210))
-    line_w = int(size * 0.18)
-    line_y = int(size * 0.83)
-    draw.line([(size // 2 - line_w // 2, line_y), (size // 2 + line_w // 2, line_y)], fill=(255, 255, 255, 120), width=max(1, int(size*0.005)))
+    draw.text((sub_x, sub_y), sub_text, font=sub_font, fill=(210, 215, 225, 220))
+    
+    # Small divider accent line
+    line_w = int(size * 0.14)
+    line_y = int(size * 0.74)
+    draw.line([(size // 2 - line_w // 2, line_y), (size // 2 + line_w // 2, line_y)], fill=(255, 255, 255, 140), width=max(1, int(size*0.004)))
     
     return img
 

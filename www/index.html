@@ -1084,15 +1084,47 @@
     };
 
     async function loadAllProfiles() {
-        allProfiles[PRESETS.roxana.id] = PRESETS.roxana;
-        allProfiles[PRESETS.angel.id] = PRESETS.angel;
+        allProfiles[PRESETS.roxana.id] = { ...PRESETS.roxana };
+        allProfiles[PRESETS.angel.id] = { ...PRESETS.angel };
+        allProfiles['roxana'] = allProfiles[PRESETS.roxana.id];
+        allProfiles['angel'] = allProfiles[PRESETS.angel.id];
 
+        // 1. Read from localStorage aura_cloud_user if present
+        const cloudUserStr = localStorage.getItem('aura_cloud_user');
+        if (cloudUserStr) {
+            try {
+                const cu = JSON.parse(cloudUserStr);
+                if (cu && cu.name) {
+                    const cuEmail = (cu.email || '').toLowerCase();
+                    const cuName = (cu.name || '').toLowerCase();
+                    if (cuEmail.includes('angel') || cuName.includes('ángel') || cuName.includes('angel')) {
+                        allProfiles[PRESETS.angel.id] = { ...allProfiles[PRESETS.angel.id], ...cu };
+                        allProfiles['angel'] = allProfiles[PRESETS.angel.id];
+                    } else if (cuEmail.includes('roxana') || cuName.includes('roxana')) {
+                        allProfiles[PRESETS.roxana.id] = { ...allProfiles[PRESETS.roxana.id], ...cu };
+                        allProfiles['roxana'] = allProfiles[PRESETS.roxana.id];
+                    }
+                    if (cu.id) allProfiles[cu.id] = cu;
+                }
+            } catch(e) {}
+        }
+
+        // 2. Fetch all profiles from Supabase database
         try {
             const { data, error } = await sb.from('profiles').select('*');
             if (!error && data && data.length > 0) {
                 data.forEach(p => {
-                    if (p && p.id) {
-                        allProfiles[p.id] = { ...allProfiles[p.id], ...p };
+                    if (p) {
+                        if (p.id) allProfiles[p.id] = p;
+                        const pEmail = (p.email || '').toLowerCase();
+                        const pName = (p.name || '').toLowerCase();
+                        if (pEmail.includes('angel') || pName.includes('ángel') || pName.includes('angel')) {
+                            allProfiles[PRESETS.angel.id] = { ...allProfiles[PRESETS.angel.id], ...p };
+                            allProfiles['angel'] = allProfiles[PRESETS.angel.id];
+                        } else if (pEmail.includes('roxana') || pName.includes('roxana')) {
+                            allProfiles[PRESETS.roxana.id] = { ...allProfiles[PRESETS.roxana.id], ...p };
+                            allProfiles['roxana'] = allProfiles[PRESETS.roxana.id];
+                        }
                     }
                 });
             }
@@ -1100,27 +1132,44 @@
             console.warn('loadAllProfiles error:', e);
         }
 
-        if (currentUser && allProfiles[currentUser.id]) {
-            currentUser = { ...currentUser, ...allProfiles[currentUser.id] };
-            localStorage.setItem('aura_cloud_user', JSON.stringify(currentUser));
+        // 3. Update current user & header/partner UI
+        if (currentUser) {
+            const isRox = (currentUser.email?.toLowerCase().includes('roxana') || currentUser.name?.toLowerCase().includes('roxana') || currentUser.id === PRESETS.roxana.id);
+            const userKey = isRox ? PRESETS.roxana.id : PRESETS.angel.id;
+            currentUser = { ...currentUser, ...(allProfiles[currentUser.id] || allProfiles[userKey] || {}) };
             localStorage.setItem('aura_chat_user', JSON.stringify(currentUser));
+            localStorage.setItem('aura_cloud_user', JSON.stringify(currentUser));
         }
+
+        const partner = getPartnerProfile();
+        const partnerNameEl = document.getElementById('chatPartnerName');
+        const partnerAvatarEl = document.getElementById('chatPartnerAvatar');
+        if (partnerNameEl) partnerNameEl.innerText = partner.name;
+        if (partnerAvatarEl && partner.avatar_url) partnerAvatarEl.src = partner.avatar_url;
     }
 
     function getProfile(id) {
-        return allProfiles[id] || (id === currentUser?.id ? currentUser : getPartnerProfile());
+        if (!id) return getPartnerProfile();
+        if (allProfiles[id]) return allProfiles[id];
+        const sId = String(id).toLowerCase();
+        if (sId.includes('angel') || sId.includes('0002')) return allProfiles[PRESETS.angel.id] || allProfiles['angel'] || PRESETS.angel;
+        if (sId.includes('roxana') || sId.includes('0001')) return allProfiles[PRESETS.roxana.id] || allProfiles['roxana'] || PRESETS.roxana;
+        return (id === currentUser?.id ? currentUser : getPartnerProfile());
     }
 
     function getPartnerProfile() {
-        if (!currentUser) return PRESETS.angel;
-        return (currentUser.id === PRESETS.roxana.id) ? (allProfiles[PRESETS.angel.id] || PRESETS.angel) : (allProfiles[PRESETS.roxana.id] || PRESETS.roxana);
+        if (!currentUser) return allProfiles[PRESETS.angel.id] || PRESETS.angel;
+        const isRox = (currentUser.email?.toLowerCase().includes('roxana') || currentUser.name?.toLowerCase().includes('roxana') || currentUser.id === PRESETS.roxana.id);
+        return isRox ? (allProfiles[PRESETS.angel.id] || allProfiles['angel'] || PRESETS.angel) : (allProfiles[PRESETS.roxana.id] || allProfiles['roxana'] || PRESETS.roxana);
     }
 
-    function loginAsPreset(key) {
+    async function loginAsPreset(key) {
         triggerHaptic();
-        const user = PRESETS[key];
-        localStorage.setItem('aura_chat_user', JSON.stringify(user));
+        await loadAllProfiles();
+        const user = (key === 'roxana') ? (allProfiles[PRESETS.roxana.id] || PRESETS.roxana) : (allProfiles[PRESETS.angel.id] || PRESETS.angel);
         currentUser = user;
+        localStorage.setItem('aura_chat_user', JSON.stringify(user));
+        localStorage.setItem('aura_cloud_user', JSON.stringify(user));
         showApp();
         loadChatMessages();
         setupRealtime();
