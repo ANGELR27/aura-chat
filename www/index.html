@@ -1333,33 +1333,24 @@
         allProfiles['roxana'] = allProfiles[PRESETS.roxana.id];
         allProfiles['angel'] = allProfiles[PRESETS.angel.id];
 
-        // 1. Read from localStorage aura_cloud_user if present
-        const cloudUserStr = localStorage.getItem('aura_cloud_user');
-        if (cloudUserStr) {
+        // 1. Read from localStorage cache
+        const cached = localStorage.getItem('roan_cached_profiles');
+        if (cached) {
             try {
-                const cu = JSON.parse(cloudUserStr);
-                if (cu && cu.name) {
-                    const cuEmail = (cu.email || '').toLowerCase();
-                    const cuName = (cu.name || '').toLowerCase();
-                    if (cuEmail.includes('angel') || cuName.includes('ángel') || cuName.includes('angel')) {
-                        allProfiles[PRESETS.angel.id] = { ...allProfiles[PRESETS.angel.id], ...cu };
-                        allProfiles['angel'] = allProfiles[PRESETS.angel.id];
-                    } else if (cuEmail.includes('roxana') || cuName.includes('roxana')) {
-                        allProfiles[PRESETS.roxana.id] = { ...allProfiles[PRESETS.roxana.id], ...cu };
-                        allProfiles['roxana'] = allProfiles[PRESETS.roxana.id];
-                    }
-                    if (cu.id) allProfiles[cu.id] = cu;
-                }
+                const parsed = JSON.parse(cached);
+                allProfiles = { ...allProfiles, ...parsed };
             } catch(e) {}
         }
 
-        // 2. Fetch all profiles from Supabase database
+        // 2. Background fetch with 3s timeout
         try {
-            const { data, error } = await sb.from('profiles').select('*');
-            if (!error && data && data.length > 0) {
-                data.forEach(p => {
-                    if (p) {
-                        if (p.id) allProfiles[p.id] = p;
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject('timeout'), 3000));
+            const fetchPromise = sb.from('profiles').select('*');
+            const res = await Promise.race([fetchPromise, timeoutPromise]);
+            if (res && res.data && res.data.length > 0) {
+                res.data.forEach(p => {
+                    if (p && p.id) {
+                        allProfiles[p.id] = { ...(allProfiles[p.id] || {}), ...p };
                         const pEmail = (p.email || '').toLowerCase();
                         const pName = (p.name || '').toLowerCase();
                         if (pEmail.includes('angel') || pName.includes('ángel') || pName.includes('angel')) {
@@ -1371,12 +1362,12 @@
                         }
                     }
                 });
+                localStorage.setItem('roan_cached_profiles', JSON.stringify(allProfiles));
             }
         } catch(e) {
-            console.warn('loadAllProfiles error:', e);
+            console.warn('[ROAN] loadAllProfiles background sync:', e);
         }
 
-        // 3. Update current user & header/partner UI
         if (currentUser) {
             const isRox = (currentUser.email?.toLowerCase().includes('roxana') || currentUser.name?.toLowerCase().includes('roxana') || currentUser.id === PRESETS.roxana.id);
             const userKey = isRox ? PRESETS.roxana.id : PRESETS.angel.id;
@@ -1385,15 +1376,11 @@
             localStorage.setItem('aura_cloud_user', JSON.stringify(currentUser));
         }
 
-        try {
-            localStorage.setItem('roan_cached_profiles', JSON.stringify(allProfiles));
-        } catch(e) {}
-
         const partner = getPartnerProfile();
         const partnerNameEl = document.getElementById('chatPartnerName');
         const partnerAvatarEl = document.getElementById('chatPartnerAvatar');
-        if (partnerNameEl) partnerNameEl.innerText = partner.name;
-        if (partnerAvatarEl && partner.avatar_url) partnerAvatarEl.src = partner.avatar_url;
+        if (partnerNameEl && partner) partnerNameEl.innerText = partner.name;
+        if (partnerAvatarEl && partner?.avatar_url) partnerAvatarEl.src = partner.avatar_url;
     }
 
     function getProfile(id) {
@@ -1413,12 +1400,12 @@
 
     async function loginAsPreset(key) {
         triggerHaptic();
-        await loadAllProfiles();
         const user = (key === 'roxana') ? (allProfiles[PRESETS.roxana.id] || PRESETS.roxana) : (allProfiles[PRESETS.angel.id] || PRESETS.angel);
         currentUser = user;
         localStorage.setItem('aura_chat_user', JSON.stringify(user));
         localStorage.setItem('aura_cloud_user', JSON.stringify(user));
         showApp();
+        loadAllProfiles();
         loadChatMessages();
         setupRealtime();
         initDeviceNotificationChannels();
@@ -1440,21 +1427,28 @@
     }
 
     function showApp() {
-        document.getElementById('authScreen').style.display = 'none';
-        document.getElementById('loadingScreen').style.display = 'none';
-        document.getElementById('mainApp').style.display = 'flex';
-        const partner = getPartnerProfile();
-        document.getElementById('chatPartnerName').innerText = partner.name;
-        document.getElementById('chatPartnerAvatar').src = partner.avatar_url;
+        const loading = document.getElementById('loadingScreen');
+        if (loading) loading.style.display = 'none';
+        const auth = document.getElementById('authScreen');
+        if (auth) auth.style.display = 'none';
+        const main = document.getElementById('mainApp');
+        if (main) main.style.display = 'flex';
+
+        try {
+            const partner = getPartnerProfile();
+            const partnerNameEl = document.getElementById('chatPartnerName');
+            const partnerAvatarEl = document.getElementById('chatPartnerAvatar');
+            if (partnerNameEl && partner) partnerNameEl.innerText = partner.name || 'Amor';
+            if (partnerAvatarEl && partner?.avatar_url) partnerAvatarEl.src = partner.avatar_url;
+        } catch(e) {}
+        
         lucide.createIcons();
 
         // Prompt permissions smoothly
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
             navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {});
         }
-        if ('Notification' in window && Notification.permission === 'default') {
-            Notification.requestPermission();
-        }
+        initDeviceNotificationChannels();
     }
 
     /* ===== LIGHTBOX ===== */
@@ -2344,6 +2338,26 @@
         initTheme();
         lucide.createIcons();
 
+        // Safety fallback: always dismiss loading spinner within 1.2s MAX
+        setTimeout(() => {
+            const loader = document.getElementById('loadingScreen');
+            if (loader && loader.style.display !== 'none') {
+                loader.style.display = 'none';
+                if (!currentUser) {
+                    document.getElementById('authScreen').style.display = 'flex';
+                }
+            }
+        }, 1200);
+
+        // Preload profiles from local cache immediately
+        allProfiles[PRESETS.roxana.id] = { ...PRESETS.roxana };
+        allProfiles[PRESETS.angel.id] = { ...PRESETS.angel };
+        allProfiles['roxana'] = allProfiles[PRESETS.roxana.id];
+        allProfiles['angel'] = allProfiles[PRESETS.angel.id];
+
+        // Register notifications
+        initDeviceNotificationChannels();
+
         // Register Capacitor LocalNotifications action handler
         if (window.Capacitor?.Plugins?.LocalNotifications) {
             try {
@@ -2381,13 +2395,13 @@
             try {
                 currentUser = JSON.parse(savedUser);
             } catch(e) {
-                document.getElementById('loadingScreen').style.display = 'none';
-                document.getElementById('authScreen').style.display = 'flex';
-                return;
+                currentUser = null;
             }
+        }
 
-            await loadAllProfiles();
+        if (currentUser) {
             showApp();
+            loadAllProfiles();
             loadChatMessages();
             setupRealtime();
         } else {
