@@ -294,8 +294,14 @@
                         </p>
                     </div>
                 </div>
-                <div class="flex items-center gap-1.5">
-                    <button onclick="toggleThemeMode()" class="p-2 rounded-xl glass hover:scale-105 active:scale-95 transition-all text-pink-700 dark:text-orange-400 cursor-pointer" title="Cambiar Tema">
+                <div class="flex items-center gap-1 sm:gap-1.5">
+                    <button onclick="initiateWebRTCCall('audio')" class="p-2 rounded-xl glass hover:scale-105 active:scale-95 transition-all text-emerald-600 dark:text-emerald-400 cursor-pointer shadow-sm" title="Llamada de Voz">
+                        <i data-lucide="phone" class="w-4.5 h-4.5"></i>
+                    </button>
+                    <button onclick="initiateWebRTCCall('video')" class="p-2 rounded-xl glass hover:scale-105 active:scale-95 transition-all text-pink-600 dark:text-orange-400 cursor-pointer shadow-sm" title="Videollamada">
+                        <i data-lucide="video" class="w-4.5 h-4.5"></i>
+                    </button>
+                    <button onclick="toggleThemeMode()" class="p-2 rounded-xl glass hover:scale-105 active:scale-95 transition-all text-neutral-600 dark:text-orange-400 cursor-pointer" title="Cambiar Tema">
                         <i data-lucide="moon" class="w-4 h-4 hidden dark:block"></i>
                         <i data-lucide="sun" class="w-4 h-4 block dark:hidden"></i>
                     </button>
@@ -415,6 +421,102 @@
         </div>
         <div class="max-w-4xl max-h-[88vh] flex items-center justify-center overflow-hidden rounded-3xl" onclick="event.stopPropagation()">
             <img id="chatLightboxImg" src="" class="max-w-full max-h-[88vh] object-contain rounded-2xl shadow-2xl animate-scale-up">
+        </div>
+    </div>
+
+    <!-- ========================== MODAL: LLAMADA ENTRANTE ========================== -->
+    <div id="incomingCallModal" class="hidden fixed inset-0 z-[130] bg-neutral-950/95 backdrop-blur-2xl flex flex-col items-center justify-between p-6 sm:p-10 select-none animate-scale-up">
+        <!-- Top Status -->
+        <div class="text-center pt-8 space-y-2">
+            <span class="px-3 py-1 rounded-full bg-pink-500/20 dark:bg-orange-500/20 text-pink-400 dark:text-orange-300 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 mx-auto w-max">
+                <span class="w-2 h-2 rounded-full bg-pink-400 dark:bg-orange-400 animate-ping"></span>
+                <span id="incomingCallTypeBadge">Llamada Entrante</span>
+            </span>
+            <h2 id="incomingCallCallerName" class="font-display font-extrabold text-2xl sm:text-3xl text-white tracking-tight"></h2>
+            <p class="text-xs text-white/60 font-medium">Llamando...</p>
+        </div>
+
+        <!-- Center Glowing Avatar Pulse -->
+        <div class="relative my-auto flex items-center justify-center">
+            <div class="absolute w-44 h-44 sm:w-56 sm:h-56 rounded-full bg-pink-500/20 dark:bg-orange-500/20 animate-ping"></div>
+            <div class="absolute w-36 h-36 sm:w-44 sm:h-44 rounded-full bg-rose-500/30 dark:bg-amber-500/30 animate-pulse"></div>
+            <img id="incomingCallCallerAvatar" src="" class="relative z-10 w-28 h-28 sm:w-36 sm:h-36 rounded-full object-cover border-4 border-pink-400 dark:border-orange-400 shadow-2xl">
+        </div>
+
+        <!-- Bottom Action Buttons -->
+        <div class="w-full max-w-xs flex items-center justify-around pb-8 pt-4">
+            <button onclick="rejectIncomingCall()" class="flex flex-col items-center gap-2 group cursor-pointer active:scale-95 transition-all">
+                <div class="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center shadow-lg shadow-rose-600/50 group-hover:scale-110 transition-transform">
+                    <i data-lucide="phone-off" class="w-7 h-7"></i>
+                </div>
+                <span class="text-xs font-bold text-white/80">Rechazar</span>
+            </button>
+
+            <button onclick="acceptIncomingCall()" class="flex flex-col items-center gap-2 group cursor-pointer active:scale-95 transition-all">
+                <div class="w-16 h-16 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-600/50 group-hover:scale-110 transition-transform animate-bounce">
+                    <i id="incomingCallAcceptIcon" data-lucide="phone" class="w-7 h-7"></i>
+                </div>
+                <span class="text-xs font-bold text-white/80">Contestar</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- ========================== MODAL: SALA DE LLAMADA ACTIVA ========================== -->
+    <div id="activeCallModal" class="hidden fixed inset-0 z-[125] bg-neutral-950 flex flex-col justify-between overflow-hidden select-none">
+        <!-- Remote Video (Full-bleed Background) -->
+        <video id="remoteVideoElement" autoplay playsinline class="absolute inset-0 w-full h-full object-cover z-0"></video>
+
+        <!-- Voice Call Avatar Fallback (when video is off) -->
+        <div id="voiceCallCenterContainer" class="absolute inset-0 flex flex-col items-center justify-center z-10 space-y-4 bg-gradient-to-b from-neutral-950/80 via-neutral-900/90 to-neutral-950/95">
+            <div class="relative">
+                <div class="absolute -inset-4 rounded-full bg-pink-500/20 dark:bg-orange-500/20 blur-xl animate-pulse"></div>
+                <img id="activeCallPartnerAvatar" src="" class="relative z-10 w-28 h-28 sm:w-36 sm:h-36 rounded-full object-cover border-4 border-pink-400 dark:border-orange-400 shadow-2xl">
+            </div>
+            <div class="text-center space-y-1">
+                <h3 id="activeCallPartnerName" class="font-display font-extrabold text-xl sm:text-2xl text-white"></h3>
+                <p id="activeCallStatusText" class="text-xs text-white/60 font-mono">Conectando llamada...</p>
+            </div>
+        </div>
+
+        <!-- Local Video PiP Bubble (Floating Camera) -->
+        <div id="localVideoPipContainer" class="absolute top-4 right-4 z-20 w-28 h-40 sm:w-36 sm:h-52 rounded-2xl overflow-hidden shadow-2xl border-2 border-white/30 dark:border-orange-500/40 bg-black/80 backdrop-blur-md">
+            <video id="localVideoElement" autoplay playsinline muted class="w-full h-full object-cover"></video>
+        </div>
+
+        <!-- Top Call Header Overlay -->
+        <div class="relative z-20 p-4 sm:p-6 flex items-center justify-between bg-gradient-to-b from-black/80 via-black/40 to-transparent">
+            <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-white">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span id="activeCallTimer" class="text-xs font-mono font-bold">00:00</span>
+            </div>
+            <div class="px-3 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-[10px] text-white/80 font-medium flex items-center gap-1">
+                <i data-lucide="shield-check" class="w-3 h-3 text-emerald-400"></i> Cifrado P2P
+            </div>
+        </div>
+
+        <!-- Bottom Floating Controls Bar -->
+        <div class="relative z-20 p-4 sm:p-8 flex items-center justify-center bg-gradient-to-t from-black/90 via-black/50 to-transparent">
+            <div class="flex items-center gap-3 sm:gap-4 p-2 sm:p-3 rounded-full bg-neutral-900/80 backdrop-blur-2xl border border-white/15 shadow-2xl">
+                <!-- Mute Mic Button -->
+                <button id="callToggleMicBtn" onclick="toggleCallMuteMic()" class="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer active:scale-90 transition-all" title="Silenciar Micrófono">
+                    <i id="callMicIcon" data-lucide="mic" class="w-5 h-5"></i>
+                </button>
+
+                <!-- Toggle Camera Button -->
+                <button id="callToggleVideoBtn" onclick="toggleCallVideoCamera()" class="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer active:scale-90 transition-all" title="Apagar Cámara">
+                    <i id="callVideoIcon" data-lucide="video" class="w-5 h-5"></i>
+                </button>
+
+                <!-- Switch Camera (Front/Back) -->
+                <button id="callFlipCameraBtn" onclick="flipCallCamera()" class="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer active:scale-90 transition-all" title="Cambiar Cámara">
+                    <i data-lucide="camera" class="w-5 h-5"></i>
+                </button>
+
+                <!-- End Call Button -->
+                <button onclick="endActiveCall(true)" class="w-14 h-14 rounded-full bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center shadow-lg shadow-rose-600/50 cursor-pointer active:scale-90 transition-all" title="Colgar">
+                    <i data-lucide="phone-off" class="w-6 h-6"></i>
+                </button>
+            </div>
         </div>
     </div>
 
@@ -601,6 +703,377 @@
         } catch(e) {}
     }
 
+    /* ===== WEBRTC VOICE & VIDEO CALLS ENGINE ===== */
+    let localStream = null;
+    let peerConnection = null;
+    let activeCallMode = null;
+    let isCaller = false;
+    let pendingIncomingOffer = null;
+    let callTimerInterval = null;
+    let callStartTime = 0;
+    let ringtoneInterval = null;
+    let isFacingUser = true;
+
+    const RTC_CONFIG = {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' }
+        ]
+    };
+
+    function startRingtoneSound() {
+        stopAllCallSounds();
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            const playCadence = () => {
+                try {
+                    const ctx = new AudioCtx();
+                    const osc1 = ctx.createOscillator();
+                    const osc2 = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc1.frequency.value = 440;
+                    osc2.frequency.value = 480;
+                    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 1.6);
+                    osc1.connect(gain);
+                    osc2.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc1.start();
+                    osc2.start();
+                    osc1.stop(ctx.currentTime + 1.6);
+                    osc2.stop(ctx.currentTime + 1.6);
+                } catch(e) {}
+            };
+            playCadence();
+            ringtoneInterval = setInterval(playCadence, 3000);
+            if (navigator.vibrate) navigator.vibrate([400, 300, 400, 300, 800]);
+        } catch(e) {}
+    }
+
+    function stopAllCallSounds() {
+        if (ringtoneInterval) {
+            clearInterval(ringtoneInterval);
+            ringtoneInterval = null;
+        }
+    }
+
+    async function initiateWebRTCCall(mode = 'video') {
+        if (!currentUser) return toast('Inicia sesión para llamar', 'error');
+        triggerHaptic();
+        activeCallMode = mode;
+        isCaller = true;
+        const partner = getPartnerProfile();
+
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia({
+                audio: true,
+                video: mode === 'video' ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } : false
+            });
+        } catch(err) {
+            console.error('getUserMedia error:', err);
+            return toast('Permiso de micrófono/cámara denegado. Actívalos en Ajustes.', 'error');
+        }
+
+        showActiveCallUI(mode, partner);
+        document.getElementById('activeCallStatusText').innerText = 'Llamando...';
+        startRingtoneSound();
+
+        createPeerConnection();
+
+        try {
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+
+            realtimeChannelGlobal?.send({
+                type: 'broadcast',
+                event: 'call_offer',
+                payload: {
+                    from: currentUser.id,
+                    name: currentUser.name,
+                    avatar: currentUser.avatar_url,
+                    mode: mode,
+                    offer: offer
+                }
+            });
+        } catch(err) {
+            console.error('Error creating call offer:', err);
+            endActiveCall(true);
+        }
+    }
+
+    async function handleIncomingCallOffer(payload) {
+        if (!currentUser || payload.from === currentUser.id) return;
+        if (peerConnection || localStream) {
+            realtimeChannelGlobal?.send({
+                type: 'broadcast',
+                event: 'call_reject',
+                payload: { reason: 'busy' }
+            });
+            return;
+        }
+
+        pendingIncomingOffer = payload;
+        activeCallMode = payload.mode || 'video';
+        isCaller = false;
+
+        const caller = getProfile(payload.from);
+        document.getElementById('incomingCallCallerName').innerText = caller.name;
+        document.getElementById('incomingCallCallerAvatar').src = caller.avatar_url;
+        document.getElementById('incomingCallTypeBadge').innerText = (payload.mode === 'video') ? 'Videollamada Entrante' : 'Llamada de Voz';
+        document.getElementById('incomingCallAcceptIcon').setAttribute('data-lucide', payload.mode === 'video' ? 'video' : 'phone');
+        
+        document.getElementById('incomingCallModal').classList.remove('hidden');
+        lucide.createIcons();
+        startRingtoneSound();
+    }
+
+    async function acceptIncomingCall() {
+        if (!pendingIncomingOffer) return;
+        stopAllCallSounds();
+        triggerHaptic();
+        const offerPayload = pendingIncomingOffer;
+        pendingIncomingOffer = null;
+        document.getElementById('incomingCallModal').classList.add('hidden');
+
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia({
+                audio: true,
+                video: offerPayload.mode === 'video' ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } : false
+            });
+        } catch(err) {
+            console.error('Error opening media for incoming call:', err);
+            toast('Permiso de cámara/micrófono requerido para contestar', 'error');
+            rejectIncomingCall();
+            return;
+        }
+
+        const partner = getProfile(offerPayload.from);
+        showActiveCallUI(offerPayload.mode, partner);
+        document.getElementById('activeCallStatusText').innerText = 'Conectando...';
+
+        createPeerConnection();
+
+        try {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(offerPayload.offer));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+
+            realtimeChannelGlobal?.send({
+                type: 'broadcast',
+                event: 'call_answer',
+                payload: {
+                    from: currentUser.id,
+                    answer: answer
+                }
+            });
+        } catch(err) {
+            console.error('Error accepting call:', err);
+            endActiveCall(true);
+        }
+    }
+
+    function rejectIncomingCall() {
+        stopAllCallSounds();
+        triggerHaptic();
+        pendingIncomingOffer = null;
+        document.getElementById('incomingCallModal').classList.add('hidden');
+        realtimeChannelGlobal?.send({
+            type: 'broadcast',
+            event: 'call_reject',
+            payload: { from: currentUser.id }
+        });
+    }
+
+    function createPeerConnection() {
+        if (peerConnection) {
+            try { peerConnection.close(); } catch(e) {}
+        }
+
+        peerConnection = new RTCPeerConnection(RTC_CONFIG);
+
+        if (localStream) {
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+            });
+        }
+
+        peerConnection.ontrack = (event) => {
+            stopAllCallSounds();
+            const remoteVideo = document.getElementById('remoteVideoElement');
+            if (remoteVideo && event.streams && event.streams[0]) {
+                remoteVideo.srcObject = event.streams[0];
+            }
+            document.getElementById('activeCallStatusText')?.classList.add('hidden');
+            startCallTimer();
+        };
+
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                realtimeChannelGlobal?.send({
+                    type: 'broadcast',
+                    event: 'call_ice',
+                    payload: { candidate: event.candidate }
+                });
+            }
+        };
+
+        peerConnection.onconnectionstatechange = () => {
+            if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'closed') {
+                endActiveCall(false);
+            }
+        };
+    }
+
+    function showActiveCallUI(mode, partner) {
+        const modal = document.getElementById('activeCallModal');
+        const partnerAvatar = document.getElementById('activeCallPartnerAvatar');
+        const partnerName = document.getElementById('activeCallPartnerName');
+        const localVideo = document.getElementById('localVideoElement');
+        const voiceCenter = document.getElementById('voiceCallCenterContainer');
+        const localPip = document.getElementById('localVideoPipContainer');
+        const flipBtn = document.getElementById('callFlipCameraBtn');
+        const videoBtn = document.getElementById('callToggleVideoBtn');
+
+        if (partnerAvatar) partnerAvatar.src = partner.avatar_url;
+        if (partnerName) partnerName.innerText = partner.name;
+
+        if (mode === 'video') {
+            if (localVideo && localStream) localVideo.srcObject = localStream;
+            localPip?.classList.remove('hidden');
+            voiceCenter?.classList.add('hidden');
+            flipBtn?.classList.remove('hidden');
+            videoBtn?.classList.remove('hidden');
+        } else {
+            localPip?.classList.add('hidden');
+            voiceCenter?.classList.remove('hidden');
+            flipBtn?.classList.add('hidden');
+            videoBtn?.classList.add('hidden');
+        }
+
+        modal?.classList.remove('hidden');
+        lucide.createIcons();
+    }
+
+    function startCallTimer() {
+        if (callTimerInterval) clearInterval(callTimerInterval);
+        callStartTime = Date.now();
+        const timerEl = document.getElementById('activeCallTimer');
+        callTimerInterval = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - callStartTime) / 1000);
+            const m = Math.floor(elapsed / 60);
+            const s = elapsed % 60;
+            if (timerEl) timerEl.innerText = `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+        }, 1000);
+    }
+
+    function endActiveCall(sendSignal = true) {
+        stopAllCallSounds();
+        triggerHaptic();
+
+        if (callTimerInterval) {
+            clearInterval(callTimerInterval);
+            callTimerInterval = null;
+        }
+
+        if (sendSignal) {
+            realtimeChannelGlobal?.send({
+                type: 'broadcast',
+                event: 'call_end',
+                payload: { from: currentUser?.id }
+            });
+        }
+
+        if (localStream) {
+            localStream.getTracks().forEach(t => t.stop());
+            localStream = null;
+        }
+
+        if (peerConnection) {
+            try { peerConnection.close(); } catch(e) {}
+            peerConnection = null;
+        }
+
+        const remoteVideo = document.getElementById('remoteVideoElement');
+        const localVideo = document.getElementById('localVideoElement');
+        if (remoteVideo) remoteVideo.srcObject = null;
+        if (localVideo) localVideo.srcObject = null;
+
+        document.getElementById('activeCallModal')?.classList.add('hidden');
+        document.getElementById('incomingCallModal')?.classList.add('hidden');
+        toast('Llamada finalizada', 'info');
+    }
+
+    function toggleCallMuteMic() {
+        triggerHaptic();
+        if (!localStream) return;
+        const audioTrack = localStream.getAudioTracks()[0];
+        if (!audioTrack) return;
+        audioTrack.enabled = !audioTrack.enabled;
+        const icon = document.getElementById('callMicIcon');
+        const btn = document.getElementById('callToggleMicBtn');
+        if (audioTrack.enabled) {
+            icon?.setAttribute('data-lucide', 'mic');
+            btn?.classList.remove('bg-rose-500/40', 'text-rose-400');
+            toast('Micrófono activado', 'info');
+        } else {
+            icon?.setAttribute('data-lucide', 'mic-off');
+            btn?.classList.add('bg-rose-500/40', 'text-rose-400');
+            toast('Micrófono silenciado', 'info');
+        }
+        lucide.createIcons();
+    }
+
+    function toggleCallVideoCamera() {
+        triggerHaptic();
+        if (!localStream) return;
+        const videoTrack = localStream.getVideoTracks()[0];
+        if (!videoTrack) return;
+        videoTrack.enabled = !videoTrack.enabled;
+        const icon = document.getElementById('callVideoIcon');
+        const btn = document.getElementById('callToggleVideoBtn');
+        if (videoTrack.enabled) {
+            icon?.setAttribute('data-lucide', 'video');
+            btn?.classList.remove('bg-rose-500/40', 'text-rose-400');
+            toast('Cámara encendida', 'info');
+        } else {
+            icon?.setAttribute('data-lucide', 'video-off');
+            btn?.classList.add('bg-rose-500/40', 'text-rose-400');
+            toast('Cámara apagada', 'info');
+        }
+        lucide.createIcons();
+    }
+
+    async function flipCallCamera() {
+        triggerHaptic();
+        if (!localStream) return;
+        const videoTrack = localStream.getVideoTracks()[0];
+        if (!videoTrack) return;
+
+        try {
+            videoTrack.stop();
+            isFacingUser = !isFacingUser;
+            const newStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: isFacingUser ? 'user' : 'environment' }
+            });
+            const newTrack = newStream.getVideoTracks()[0];
+            localStream.removeTrack(videoTrack);
+            localStream.addTrack(newTrack);
+
+            const localVideo = document.getElementById('localVideoElement');
+            if (localVideo) localVideo.srcObject = localStream;
+
+            if (peerConnection) {
+                const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+                if (sender) sender.replaceTrack(newTrack);
+            }
+            toast('Cámara cambiada', 'info');
+        } catch(e) {
+            console.error('flip camera error:', e);
+        }
+    }
+
     /* ===== AUTH & PROFILES ===== */
     const PRESETS = {
         roxana: { id: '00000000-0000-0000-0000-000000000001', name: 'Roxana', email: 'roxana@aura.app', avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80' },
@@ -672,6 +1145,14 @@
         document.getElementById('chatPartnerName').innerText = partner.name;
         document.getElementById('chatPartnerAvatar').src = partner.avatar_url;
         lucide.createIcons();
+
+        // Prompt permissions smoothly
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {});
+        }
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
     }
 
     /* ===== LIGHTBOX ===== */
@@ -1331,6 +1812,33 @@
                         playNotificationSound();
                     }
                 }
+            })
+            .on('broadcast', { event: 'call_offer' }, payload => {
+                if (payload.payload) handleIncomingCallOffer(payload.payload);
+            })
+            .on('broadcast', { event: 'call_answer' }, async payload => {
+                if (payload.payload && peerConnection) {
+                    try {
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.payload.answer));
+                    } catch(e) {
+                        console.error('Error setting remote answer:', e);
+                    }
+                }
+            })
+            .on('broadcast', { event: 'call_ice' }, async payload => {
+                if (payload.payload?.candidate && peerConnection) {
+                    try {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(payload.payload.candidate));
+                    } catch(e) {}
+                }
+            })
+            .on('broadcast', { event: 'call_end' }, () => {
+                endActiveCall(false);
+            })
+            .on('broadcast', { event: 'call_reject' }, payload => {
+                stopAllCallSounds();
+                endActiveCall(false);
+                toast(payload.payload?.reason === 'busy' ? 'Línea ocupada' : 'Llamada rechazada', 'info');
             })
             .on('broadcast', { event: 'delete_message' }, payload => {
                 const targetId = payload.payload?.id;
