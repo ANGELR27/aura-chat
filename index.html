@@ -1770,8 +1770,9 @@
             `;
         }
 
-        const senderDisplayName = isMe ? 'Tú' : partner.name;
+        const senderDisplayName = isMe ? (currentUser?.name || 'Tú') : partner.name;
         const safePreview = escapeHtml(previewSnippet.substring(0, 60));
+        const msgKey = `${m.sender_id || currentUser?.id}_${encodeURIComponent((m.text || '').substring(0, 30))}`;
 
         let statusIconHtml = '';
         if (isMe) {
@@ -1800,11 +1801,6 @@
                 `;
             }
         }
-
-        const isMe = m.sender_id === currentUser.id;
-        const partner = getPartnerProfile();
-        const senderDisplayName = isMe ? (currentUser.name || 'Tú') : partner.name;
-        const msgKey = `${m.sender_id || currentUser.id}_${encodeURIComponent((m.text || '').substring(0, 30))}`;
 
         if (isMe) {
             return `
