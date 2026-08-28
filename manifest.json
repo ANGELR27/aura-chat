@@ -1,11 +1,12 @@
 {
-  "name": "Aura Chat — Mensajería Íntima",
-  "short_name": "Aura Chat",
-  "description": "Chat íntimo y privado para parejas en tiempo real",
+  "name": "ROAN",
+  "short_name": "ROAN",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#fdf0f4",
-  "theme_color": "#f43f7d",
+  "background_color": "#0a0a0c",
+  "theme_color": "#0a0a0c",
+  "description": "ROAN — Chat Íntimo & Privado de Ángel & Roxana",
+  "orientation": "portrait",
   "icons": [
     {
       "src": "./icon-192.png",
