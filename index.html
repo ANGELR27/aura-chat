@@ -1801,7 +1801,12 @@
             realtimeChannelGlobal?.send({
                 type: 'broadcast',
                 event: 'new_message',
-                payload: { sender_id: currentUser.id, text: payloadText }
+                payload: {
+                    id: tempMsg.id,
+                    sender_id: currentUser.id,
+                    text: payloadText,
+                    created_at: tempMsg.created_at
+                }
             });
         } catch(e) {}
 
@@ -1875,8 +1880,29 @@
             })
             .on('broadcast', { event: 'new_message' }, payload => {
                 const data = payload.payload;
-                if (data && data.sender_id !== currentUser.id) {
-                    loadChatMessages();
+                if (data && data.sender_id !== currentUser?.id) {
+                    hidePartnerTyping();
+                    const incomingMsg = {
+                        id: data.id || ('rt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
+                        sender_id: data.sender_id,
+                        text: data.text,
+                        created_at: data.created_at || new Date().toISOString()
+                    };
+                    
+                    const isAlreadyThere = currentChatMessages.some(m => 
+                        (m.id && m.id === incomingMsg.id) || 
+                        (m.sender_id === incomingMsg.sender_id && m.text === incomingMsg.text && Math.abs(new Date(m.created_at || 0) - new Date(incomingMsg.created_at)) < 15000)
+                    );
+                    
+                    if (!isAlreadyThere) {
+                        currentChatMessages.push(incomingMsg);
+                        localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
+                        lastChatHash = '__FORCE_RERENDER__';
+                        renderChatMessages();
+                    }
+
+                    setTimeout(() => loadChatMessages(), 600);
+
                     const author = getProfile(data.sender_id) || getPartnerProfile();
                     const isAudio = data.text && data.text.startsWith('[AUDIO');
                     const isPhoto = data.text && data.text.startsWith('[PHOTO]');
