@@ -1,0 +1,1398 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Aura Chat — Mensajería Íntima</title>
+    <!-- PWA & Mobile Web App Meta -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Aura Chat">
+    <meta name="theme-color" content="#f43f7d" id="themeColorMeta">
+    <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+    <link rel="apple-touch-icon" sizes="192x192" href="./icon-192.png">
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Supabase JS Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Canvas Confetti -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        display: ['Outfit', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+            background-color: #faf5f8;
+            color: #1f1d24;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            transition: background 0.4s ease, color 0.3s ease;
+        }
+
+        .dark html, .dark body {
+            background-color: #09090b !important;
+            color: #f4f4f5 !important;
+        }
+
+        .ambient-orb {
+            position: fixed;
+            border-radius: 9999px;
+            filter: blur(80px);
+            z-index: 0;
+            pointer-events: none;
+            opacity: 0.55;
+            transition: all 0.5s ease;
+        }
+
+        .orb-1 {
+            width: 320px;
+            height: 320px;
+            top: -60px;
+            left: -60px;
+            background: radial-gradient(circle, rgba(244, 114, 182, 0.45), transparent 70%);
+        }
+
+        .orb-2 {
+            width: 380px;
+            height: 380px;
+            bottom: -80px;
+            right: -80px;
+            background: radial-gradient(circle, rgba(251, 146, 60, 0.35), transparent 70%);
+        }
+
+        .dark .orb-1 {
+            background: radial-gradient(circle, rgba(234, 88, 12, 0.22), transparent 70%);
+        }
+
+        .dark .orb-2 {
+            background: radial-gradient(circle, rgba(217, 119, 6, 0.18), transparent 70%);
+        }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.85);
+        }
+
+        .dark .glass-card {
+            background: rgba(18, 17, 20, 0.78) !important;
+            backdrop-filter: blur(28px) !important;
+            -webkit-backdrop-filter: blur(28px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        }
+
+        .glass-subtle {
+            background: rgba(255, 255, 255, 0.5);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+        }
+
+        .dark .glass-subtle {
+            background: rgba(24, 23, 27, 0.6) !important;
+            border: 1px solid rgba(255, 255, 255, 0.05) !important;
+        }
+
+        /* Tactile Liquid Glass Chat Pill */
+        .glass-liquid-rim {
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(244, 114, 182, 0.22);
+            box-shadow: 0 4px 20px -2px rgba(244, 114, 182, 0.12), 0 2px 6px -1px rgba(0, 0, 0, 0.04);
+        }
+
+        .dark .glass-liquid-rim {
+            background: rgba(18, 18, 20, 0.75) !important;
+            backdrop-filter: blur(24px) !important;
+            -webkit-backdrop-filter: blur(24px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.6) !important;
+        }
+
+        .tactile-pill {
+            background: linear-gradient(145deg, #ffffff, #fce7f3);
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            box-shadow: 0 2px 5px rgba(219, 39, 119, 0.15), inset 0 1px 1px rgba(255, 255, 255, 1);
+            color: #db2777;
+        }
+
+        .dark .tactile-pill {
+            background: linear-gradient(145deg, #24222a, #16151a) !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.1) !important;
+            color: #f97316 !important;
+        }
+
+        .tactile-active-rim {
+            background: linear-gradient(135deg, #f43f5e, #e11d48, #db2777);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            box-shadow: 0 4px 14px rgba(225, 29, 72, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.5);
+            color: #ffffff;
+        }
+
+        .dark .tactile-active-rim {
+            background: linear-gradient(135deg, #ea580c, #f97316, #d97706) !important;
+            border: 1px solid rgba(255, 255, 255, 0.2) !important;
+            box-shadow: 0 4px 16px rgba(234, 88, 12, 0.45), inset 0 1px 1px rgba(255, 255, 255, 0.4) !important;
+            color: #ffffff !important;
+        }
+
+        .btn-gradient {
+            background: linear-gradient(135deg, #ec4899 0%, #f43f5e 50%, #e11d48 100%);
+            color: white;
+        }
+
+        .dark .btn-gradient {
+            background: linear-gradient(135deg, #ea580c 0%, #f97316 50%, #d97706 100%) !important;
+        }
+
+        .scrollbar-none::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-none {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        .animate-slide-down {
+            animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animate-slide-up {
+            animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animate-scale-up {
+            animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        @keyframes scaleUp {
+            from { opacity: 0; transform: scale(0.92); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(244, 63, 94, 0.2);
+            border-radius: 50%;
+            border-top-color: #f43f5e;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="h-full flex flex-col antialiased relative">
+
+    <div class="ambient-orb orb-1"></div>
+    <div class="ambient-orb orb-2"></div>
+
+    <div id="toastContainer" class="fixed top-4 right-4 left-4 sm:left-auto sm:w-80 z-[120] space-y-2 pointer-events-none"></div>
+
+    <!-- ========================== LOADING SPINNER ========================== -->
+    <div id="loadingScreen" class="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-pink-100/90 via-purple-50/90 to-blue-50/90 dark:from-neutral-950/95 dark:via-neutral-900/95 dark:to-neutral-950/95 backdrop-blur-md" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+        <div class="text-center space-y-4 animate-scale-up">
+            <div class="w-18 h-18 mx-auto rounded-3xl bg-gradient-to-br from-neutral-800 via-[#18171b] to-black p-[2px] shadow-[0_8px_30px_rgba(0,0,0,0.7),0_0_25px_rgba(249,115,22,0.4)] border border-orange-500/40 flex items-center justify-center">
+                <div class="w-full h-full rounded-[22px] bg-[#0c0c0e] flex items-center justify-center relative overflow-hidden">
+                    <div class="absolute -top-4 -right-4 w-12 h-12 bg-orange-500/30 rounded-full blur-lg"></div>
+                    <span class="font-serif italic font-black text-3xl bg-gradient-to-tr from-amber-200 via-orange-400 to-rose-400 bg-clip-text text-transparent drop-shadow-[0_2px_12px_rgba(249,115,22,0.6)] select-none">R</span>
+                </div>
+            </div>
+            <div class="flex items-center justify-center gap-2">
+                <div class="spinner"></div>
+                <p class="text-xs font-bold text-pink-900/70 dark:text-orange-300">Conectando con Aura Chat...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================== AUTH / LOGIN SCREEN ========================== -->
+    <div id="authScreen" class="fixed inset-0 z-40 flex items-center justify-center p-4 overflow-y-auto" style="display:none;">
+        <div class="glass-card rounded-[2.5rem] p-7 sm:p-9 max-w-md w-full animate-scale-up space-y-6 my-auto">
+            <div class="text-center space-y-2">
+                <div class="w-18 h-18 mx-auto rounded-3xl bg-gradient-to-br from-neutral-800 via-[#18171b] to-black p-[2px] shadow-[0_8px_30px_rgba(0,0,0,0.7),0_0_25px_rgba(249,115,22,0.4)] border border-orange-500/40 flex items-center justify-center">
+                    <div class="w-full h-full rounded-[22px] bg-[#0c0c0e] flex items-center justify-center relative overflow-hidden">
+                        <div class="absolute -top-4 -right-4 w-10 h-10 bg-orange-500/30 rounded-full blur-lg"></div>
+                        <span class="font-serif italic font-black text-3xl bg-gradient-to-tr from-amber-200 via-orange-400 to-rose-400 bg-clip-text text-transparent drop-shadow select-none">R</span>
+                    </div>
+                </div>
+                <h1 class="text-2xl font-display font-extrabold tracking-tight bg-gradient-to-r from-pink-600 via-rose-500 to-purple-600 dark:from-orange-400 dark:via-amber-400 dark:to-orange-500 bg-clip-text text-transparent">Aura Chat</h1>
+                <p class="text-xs font-medium text-pink-950/60 dark:text-orange-200/60">Chat Íntimo & Privado</p>
+            </div>
+
+            <!-- Quick One-Click Access -->
+            <div class="space-y-3 pt-2">
+                <p class="text-center text-[11px] font-bold text-pink-950/50 dark:text-orange-300/50 uppercase tracking-wider">Acceso Rápido Directo</p>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="loginAsPreset('roxana')" class="flex flex-col items-center p-3.5 rounded-2xl glass hover:scale-105 active:scale-95 transition-all group border border-pink-300/50 dark:border-orange-500/30 shadow-md">
+                        <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80" class="w-12 h-12 rounded-full object-cover border-2 border-pink-400 dark:border-orange-400 shadow-sm mb-2">
+                        <div class="text-center">
+                            <p class="text-xs font-bold text-pink-600 dark:text-orange-400 group-hover:underline">Roxana</p>
+                            <p class="text-[9px] opacity-60">Ella 💕</p>
+                        </div>
+                    </button>
+                    <button onclick="loginAsPreset('angel')" class="flex flex-col items-center p-3.5 rounded-2xl glass hover:scale-105 active:scale-95 transition-all group border border-purple-300/50 dark:border-amber-500/30 shadow-md">
+                        <img src="https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=400&q=80" class="w-12 h-12 rounded-full object-cover border-2 border-purple-400 dark:border-amber-400 shadow-sm mb-2">
+                        <div class="text-center">
+                            <p class="text-xs font-bold text-purple-600 dark:text-amber-400 group-hover:underline">Ángel</p>
+                            <p class="text-[9px] opacity-60">Él 💙</p>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================== STANDALONE CHAT APP ========================== -->
+    <div id="mainApp" class="relative z-10 max-w-2xl mx-auto w-full h-full flex flex-col px-3 sm:px-4 py-2 sm:py-3" style="display:none;">
+        <div class="glass-card rounded-[2.5rem] p-3.5 sm:p-5 shadow-2xl flex flex-col border border-pink-200/50 dark:border-orange-500/20 flex-1 overflow-hidden">
+            
+            <!-- Chat Partner Header -->
+            <div class="flex items-center justify-between pb-3 border-b border-pink-200/40 dark:border-orange-500/20 px-1">
+                <div class="flex items-center gap-3">
+                    <div class="relative">
+                        <img id="chatPartnerAvatar" src="" class="w-10 h-10 rounded-2xl object-cover border border-pink-300 dark:border-orange-400 shadow-md">
+                        <span class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 border-2 border-white dark:border-neutral-900 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
+                    </div>
+                    <div>
+                        <h3 id="chatPartnerName" class="font-display font-extrabold text-sm sm:text-base leading-tight"></h3>
+                        <p id="chatPartnerStatus" class="text-[10px] opacity-60 font-medium flex items-center gap-1 transition-all">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Chat Íntimo & Privado
+                        </p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <button onclick="toggleThemeMode()" class="p-2 rounded-xl glass hover:scale-105 active:scale-95 transition-all text-pink-700 dark:text-orange-400 cursor-pointer" title="Cambiar Tema">
+                        <i data-lucide="moon" class="w-4 h-4 hidden dark:block"></i>
+                        <i data-lucide="sun" class="w-4 h-4 block dark:hidden"></i>
+                    </button>
+                    <button onclick="sendQuickHeart()" class="glass p-2 rounded-xl text-rose-500 hover:scale-115 active:scale-95 transition-all cursor-pointer shadow-sm" title="Enviar amor ❤️">
+                        <i data-lucide="heart" class="w-4.5 h-4.5 fill-rose-500"></i>
+                    </button>
+                    <button onclick="handleLogout()" class="p-2 rounded-xl glass hover:scale-105 active:scale-95 transition-all text-neutral-400 hover:text-rose-500 cursor-pointer" title="Cerrar Sesión">
+                        <i data-lucide="log-out" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Chat Message Thread Container -->
+            <div id="chatMessagesList" class="flex-1 overflow-y-auto py-3 space-y-2.5 px-1 scrollbar-none"></div>
+
+            <!-- Quick Emojis Bar -->
+            <div class="flex items-center justify-between px-1 pt-1 pb-1.5 opacity-85 gap-1.5 overflow-x-auto scrollbar-none select-none">
+                <button onclick="insertChatEmoji('❤️')" class="text-lg hover:scale-130 transition-transform cursor-pointer p-0.5">❤️</button>
+                <button onclick="insertChatEmoji('🥰')" class="text-lg hover:scale-130 transition-transform cursor-pointer p-0.5">🥰</button>
+                <button onclick="insertChatEmoji('😘')" class="text-lg hover:scale-130 transition-transform cursor-pointer p-0.5">😘</button>
+                <button onclick="insertChatEmoji('✨')" class="text-lg hover:scale-130 transition-transform cursor-pointer p-0.5">✨</button>
+                <button onclick="insertChatEmoji('🌹')" class="text-lg hover:scale-130 transition-transform cursor-pointer p-0.5">🌹</button>
+                <button onclick="insertChatEmoji('🥺')" class="text-lg hover:scale-130 transition-transform cursor-pointer p-0.5">🥺</button>
+                <button onclick="insertChatEmoji('🔥')" class="text-lg hover:scale-130 transition-transform cursor-pointer p-0.5">🔥</button>
+            </div>
+
+            <!-- Chat Message Input Dock & Voice Recorder -->
+            <div class="pt-0.5 relative">
+                <!-- Quoted Message Reply Banner (Ultra-Subtle & Elegant Glass) -->
+                <div id="chatReplyBanner" class="hidden flex items-center justify-between p-2 px-3 mb-2 rounded-2xl glass-subtle border border-pink-200/50 dark:border-white/10 bg-white/75 dark:bg-neutral-900/75 backdrop-blur-xl shadow-md transition-all animate-slide-up">
+                    <div class="flex items-center gap-2.5 flex-1 min-w-0 pr-2">
+                        <div class="w-1 h-7 rounded-full bg-gradient-to-b from-pink-500 to-rose-400 dark:from-orange-400 dark:to-amber-500 flex-shrink-0"></div>
+                        <div class="flex flex-col min-w-0">
+                            <div class="flex items-center gap-1 text-[10.5px] font-bold text-pink-600 dark:text-orange-400">
+                                <i data-lucide="reply" class="w-3 h-3"></i>
+                                <span id="chatReplyAuthor">Respondiendo</span>
+                            </div>
+                            <p id="chatReplyPreview" class="text-xs truncate opacity-75 mt-0.5 text-neutral-800 dark:text-neutral-200 font-normal"></p>
+                        </div>
+                    </div>
+                    <button onclick="cancelReplyToMessage()" class="w-6 h-6 rounded-full hover:bg-black/10 dark:hover:bg-white/10 flex items-center justify-center cursor-pointer text-neutral-400 hover:text-neutral-700 dark:hover:text-white transition-colors" title="Cancelar respuesta">
+                        <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+
+                <!-- Standard Input Bar (Minimalist Liquid Glass Pill) -->
+                <div id="chatNormalInputContainer" class="relative flex items-center rounded-full glass-liquid-rim p-1 pl-3 focus-within:border-pink-400/60 dark:focus-within:border-white/40 transition-all gap-1.5 shadow-xl">
+                    <!-- Image Attachment Button -->
+                    <button onclick="document.getElementById('chatImageFileInput').click()" class="w-8 h-8 rounded-full flex items-center justify-center text-pink-500/80 hover:text-pink-600 hover:bg-pink-100/50 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-white/10 active:scale-95 transition-all cursor-pointer flex-shrink-0" title="Enviar Foto">
+                        <i data-lucide="image" class="w-4 h-4"></i>
+                    </button>
+                    <input type="file" id="chatImageFileInput" accept="image/*" class="hidden" onchange="handleSendChatImage(event)">
+
+                    <input type="text" id="chatInput" placeholder="Escribe un mensaje de amor..." class="flex-1 bg-transparent text-xs sm:text-sm font-medium outline-none pr-1 py-1.5 text-neutral-800 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-500" oninput="handleChatTypingInput()" onkeypress="if(event.key==='Enter')handleSendChatMessage()">
+
+                    <!-- Mic Button (Tactile 3D) -->
+                    <button id="chatMicBtn" onclick="toggleAudioRecording()" class="tactile-pill w-8 h-8 rounded-full flex items-center justify-center cursor-pointer active:scale-95 transition-all flex-shrink-0" title="Grabar nota de voz">
+                        <i data-lucide="mic" class="w-3.5 h-3.5"></i>
+                    </button>
+
+                    <!-- Send Button (Tactile Raised Active Button) -->
+                    <button onclick="handleSendChatMessage()" class="tactile-active-rim w-8 h-8 rounded-full flex items-center justify-center cursor-pointer active:scale-95 transition-all flex-shrink-0" title="Enviar">
+                        <i data-lucide="arrow-up" class="w-4 h-4 stroke-[2.5]"></i>
+                    </button>
+                </div>
+
+                <!-- Voice Recording Live Bar -->
+                <div id="chatRecordingContainer" class="hidden flex items-center justify-between rounded-2xl bg-rose-500/10 dark:bg-rose-950/40 border border-rose-400/40 p-2 px-3 shadow-md">
+                    <div class="flex items-center gap-2">
+                        <span class="w-3 h-3 rounded-full bg-rose-500 animate-ping"></span>
+                        <span class="text-xs font-bold text-rose-500">Grabando...</span>
+                        <span id="chatRecordTimer" class="text-xs font-mono font-bold text-rose-500 opacity-90">0:00</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="cancelAudioRecording()" class="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-500 flex items-center justify-center cursor-pointer hover:bg-rose-500/30 active:scale-90 transition-all" title="Cancelar grabación">
+                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                        </button>
+                        <button onclick="stopAndSendAudioRecording()" class="btn-gradient w-8 h-8 rounded-xl text-white flex items-center justify-center cursor-pointer shadow-md active:scale-90 transition-all" title="Enviar nota de voz">
+                            <i data-lucide="send" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================== MODAL: ELIMINAR MENSAJE ========================== -->
+    <div id="deleteMsgModal" class="hidden fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+        <div class="glass-card rounded-[2rem] p-6 max-w-sm w-full space-y-4 shadow-2xl border border-pink-200/50 dark:border-orange-500/20 text-center animate-scale-up">
+            <div class="w-12 h-12 rounded-full mx-auto bg-rose-100 dark:bg-rose-950/60 text-rose-500 flex items-center justify-center text-xl shadow-inner">
+                <i data-lucide="trash-2" class="w-6 h-6"></i>
+            </div>
+            <div>
+                <h3 class="font-display font-extrabold text-base">¿Eliminar este mensaje?</h3>
+                <p class="text-xs opacity-60 mt-1">Este mensaje desaparecerá de la conversación para ambos.</p>
+            </div>
+            <div class="space-y-2 pt-2">
+                <button id="confirmDeleteMsgBtn" onclick="executeDeleteChatMessage()" class="w-full py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 active:scale-95 text-white text-xs font-bold transition-all shadow-md cursor-pointer">
+                    Eliminar para todos
+                </button>
+                <button onclick="closeDeleteMsgModal()" class="w-full py-2.5 rounded-xl tactile-pill text-xs font-bold transition-all cursor-pointer">
+                    Cancelar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================== MODAL: LIGHTBOX FOTO CHAT DEDICADO ========================== -->
+    <div id="chatPhotoLightboxModal" class="hidden fixed inset-0 z-[110] bg-black/95 backdrop-blur-2xl flex flex-col items-center justify-center p-2 sm:p-4 fade-in" onclick="closeChatPhotoLightbox()">
+        <div class="absolute top-4 right-4 z-20 flex items-center gap-2">
+            <a id="chatLightboxDownloadBtn" href="" download="aura-foto.jpg" class="glass w-10 h-10 rounded-full flex items-center justify-center text-white hover:bg-white/20 transition-all shadow-lg cursor-pointer" onclick="event.stopPropagation()" title="Descargar imagen">
+                <i data-lucide="download" class="w-4.5 h-4.5"></i>
+            </a>
+            <button onclick="closeChatPhotoLightbox()" class="glass w-10 h-10 rounded-full flex items-center justify-center text-white hover:bg-white/20 transition-all shadow-lg cursor-pointer" title="Cerrar">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <div class="max-w-4xl max-h-[88vh] flex items-center justify-center overflow-hidden rounded-3xl" onclick="event.stopPropagation()">
+            <img id="chatLightboxImg" src="" class="max-w-full max-h-[88vh] object-contain rounded-2xl shadow-2xl animate-scale-up">
+        </div>
+    </div>
+
+    <!-- ========================== APP JAVASCRIPT ========================== -->
+    <script>
+    const SUPABASE_URL = 'https://jojfuyvbbogxszlczhca.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvamZ1eXZiYm9neHN6bGN6aGNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMwNDI2MDUsImV4cCI6MjA2ODYxODYwNX0.m5l9W6W44r2kZg491sY709xYc2mY9d7K9z5vK8bW9vU';
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    /* ===== STATE & HELPERS ===== */
+    let currentUser = null;
+    let allProfiles = {};
+    window._cachedAudios = window._cachedAudios || {};
+    let currentPlayingAudio = null;
+    let realtimeChannelGlobal = null;
+    let typingTimeout = null;
+    let partnerTypingResetTimeout = null;
+    let lastTypingBroadcast = 0;
+    let currentChatMessages = [];
+    let lastChatHash = '__UNINITIALIZED__';
+    let activeReplyTarget = null;
+    let pendingDeleteMsgId = null;
+    let touchStartX = 0;
+    let touchStartY = 0;
+
+    // Audio Voice Note state
+    let chatMediaRecorder = null;
+    let chatAudioChunks = [];
+    let chatRecordTimerInterval = null;
+    let chatRecordStartTime = 0;
+
+    /* ===== THEME ENGINE ===== */
+    function initTheme() {
+        const theme = localStorage.getItem('aura_theme_mode') || 'dark';
+        if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+            document.getElementById('themeColorMeta')?.setAttribute('content', '#09090b');
+        } else {
+            document.documentElement.classList.remove('dark');
+            document.getElementById('themeColorMeta')?.setAttribute('content', '#f43f7d');
+        }
+    }
+
+    function toggleThemeMode() {
+        triggerHaptic();
+        const isDark = document.documentElement.classList.toggle('dark');
+        localStorage.setItem('aura_theme_mode', isDark ? 'dark' : 'light');
+        document.getElementById('themeColorMeta')?.setAttribute('content', isDark ? '#09090b' : '#f43f7d');
+        lucide.createIcons();
+    }
+
+    /* ===== NOTIFICATIONS ENGINE ===== */
+    function showInAppNotification({ title, message, avatar, icon = 'bell', onClick = null, duration = 4500 }) {
+        playNotificationSound();
+        triggerHaptic();
+
+        const container = document.getElementById('toastContainer');
+        if (!container) return;
+
+        const el = document.createElement('div');
+        el.className = `pointer-events-auto flex items-center gap-3 p-3 sm:p-3.5 rounded-2xl glass-card border border-pink-200/60 dark:border-orange-500/30 bg-white/95 dark:bg-[#131217]/95 backdrop-blur-2xl shadow-lg cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-all transform animate-slide-down select-none max-w-sm w-full`;
+        const avatarUrl = avatar || (currentUser?.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=aura');
+        
+        el.innerHTML = `
+            <div class="relative flex-shrink-0">
+                <img src="${avatarUrl}" class="w-10 h-10 rounded-2xl object-cover border border-pink-300 dark:border-orange-400/60 shadow-sm">
+                <div class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-gradient-to-tr from-pink-500 to-rose-500 dark:from-orange-500 dark:to-amber-500 flex items-center justify-center text-white shadow-sm border-2 border-white dark:border-neutral-900">
+                    <i data-lucide="${icon}" class="w-2.5 h-2.5"></i>
+                </div>
+            </div>
+            <div class="flex-1 min-w-0 pr-1">
+                <div class="flex items-center justify-between gap-1 mb-0.5">
+                    <h4 class="text-xs font-bold text-neutral-900 dark:text-neutral-100 truncate">${escapeHtml(title)}</h4>
+                    <span class="text-[9px] font-mono opacity-50 flex-shrink-0">Ahora</span>
+                </div>
+                <p class="text-[11.5px] text-neutral-600 dark:text-neutral-300 font-medium leading-tight truncate">${escapeHtml(message)}</p>
+            </div>
+            <button class="w-6 h-6 rounded-full hover:bg-black/10 dark:hover:bg-white/10 flex items-center justify-center text-neutral-400 hover:text-neutral-700 dark:hover:text-white transition-colors flex-shrink-0" onclick="event.stopPropagation(); this.closest('.pointer-events-auto').remove();" title="Cerrar">
+                <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            </button>
+        `;
+
+        if (onClick) el.onclick = () => { onClick(); el.remove(); };
+        container.appendChild(el);
+        lucide.createIcons();
+
+        setTimeout(() => {
+            if (!el.parentNode) return;
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(-10px)';
+            el.style.transition = 'all 0.3s ease';
+            setTimeout(() => el.remove(), 300);
+        }, duration);
+    }
+
+    function toast(msg, type = 'info') {
+        const icons = {
+            success: { icon: 'check-circle-2', color: 'text-emerald-500 dark:text-emerald-400', badge: 'bg-emerald-500/15' },
+            error: { icon: 'alert-circle', color: 'text-rose-500 dark:text-rose-400', badge: 'bg-rose-500/15' },
+            info: { icon: 'info', color: 'text-pink-600 dark:text-orange-400', badge: 'bg-pink-500/15 dark:bg-orange-500/15' }
+        };
+        const cfg = icons[type] || icons.info;
+        const container = document.getElementById('toastContainer');
+        if (!container) return;
+
+        const el = document.createElement('div');
+        el.className = `pointer-events-auto flex items-center gap-2.5 px-4 py-2.5 rounded-2xl glass-card border border-pink-200/60 dark:border-orange-500/30 bg-white/95 dark:bg-[#131217]/95 backdrop-blur-xl shadow-lg transition-all transform animate-slide-down max-w-sm w-full`;
+        el.innerHTML = `
+            <div class="w-6 h-6 rounded-xl ${cfg.badge} ${cfg.color} flex items-center justify-center flex-shrink-0">
+                <i data-lucide="${cfg.icon}" class="w-3.5 h-3.5"></i>
+            </div>
+            <span class="text-xs font-semibold text-neutral-800 dark:text-neutral-100 flex-1 truncate">${escapeHtml(msg)}</span>
+        `;
+        container.appendChild(el);
+        lucide.createIcons();
+
+        setTimeout(() => {
+            if (!el.parentNode) return;
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(-8px)';
+            el.style.transition = 'all 0.3s ease';
+            setTimeout(() => el.remove(), 300);
+        }, 3200);
+    }
+
+    function triggerHaptic(duration = 25) {
+        try { if (window.navigator && window.navigator.vibrate) window.navigator.vibrate(duration); } catch(e) {}
+    }
+
+    function playNotificationSound() {
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+            const ctx = new AudioContext();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12);
+            gain.gain.setValueAtTime(0.25, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start();
+            osc.stop(ctx.currentTime + 0.35);
+        } catch(e) {}
+    }
+
+    async function sendNativeNotification(title, body, icon, isMsg = true) {
+        playNotificationSound();
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+        const iconUrl = icon || './icon-192.png';
+        const badgeUrl = './badge-96.png';
+        const notifOptions = {
+            body: body,
+            icon: iconUrl,
+            badge: badgeUrl,
+            tag: 'aura-chat-msg-' + Date.now(),
+            renotify: true,
+            vibrate: [200, 100, 200],
+            data: { url: window.location.href },
+            actions: [
+                { action: 'reply', type: 'text', title: 'Responder', placeholder: 'Escribe tu respuesta...' },
+                { action: 'open_chat', title: 'Abrir Chat' }
+            ]
+        };
+
+        if ('serviceWorker' in navigator) {
+            try {
+                const reg = await navigator.serviceWorker.ready;
+                if (reg && reg.showNotification) {
+                    await reg.showNotification(title, notifOptions);
+                    return;
+                }
+            } catch(e) {}
+        }
+
+        try {
+            const notif = new Notification(title, notifOptions);
+            notif.onclick = () => { window.focus(); notif.close(); };
+            setTimeout(() => notif.close(), 6000);
+        } catch(e) {}
+    }
+
+    /* ===== AUTH & PROFILES ===== */
+    const PRESETS = {
+        roxana: { id: '00000000-0000-0000-0000-000000000001', name: 'Roxana', email: 'roxana@aura.app', avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80' },
+        angel: { id: '00000000-0000-0000-0000-000000000002', name: 'Ángel', email: 'angel@aura.app', avatar_url: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=400&q=80' }
+    };
+
+    async function loadAllProfiles() {
+        try {
+            const { data } = await sb.from('profiles').select('*');
+            if (data) data.forEach(p => allProfiles[p.id] = p);
+        } catch(e) {}
+        allProfiles[PRESETS.roxana.id] = PRESETS.roxana;
+        allProfiles[PRESETS.angel.id] = PRESETS.angel;
+    }
+
+    function getProfile(id) {
+        return allProfiles[id] || (id === currentUser?.id ? currentUser : getPartnerProfile());
+    }
+
+    function getPartnerProfile() {
+        if (!currentUser) return PRESETS.angel;
+        return (currentUser.id === PRESETS.roxana.id) ? (allProfiles[PRESETS.angel.id] || PRESETS.angel) : (allProfiles[PRESETS.roxana.id] || PRESETS.roxana);
+    }
+
+    function loginAsPreset(key) {
+        triggerHaptic();
+        const user = PRESETS[key];
+        localStorage.setItem('aura_chat_user', JSON.stringify(user));
+        currentUser = user;
+        showApp();
+        loadChatMessages();
+        setupRealtime();
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+        toast(`¡Hola, ${user.name}!`, 'success');
+        confetti({ particleCount: 30, spread: 50 });
+    }
+
+    function handleLogout() {
+        triggerHaptic();
+        localStorage.removeItem('aura_chat_user');
+        currentUser = null;
+        document.getElementById('mainApp').style.display = 'none';
+        document.getElementById('authScreen').style.display = 'flex';
+        toast('Sesión cerrada', 'info');
+    }
+
+    function showApp() {
+        document.getElementById('authScreen').style.display = 'none';
+        document.getElementById('loadingScreen').style.display = 'none';
+        document.getElementById('mainApp').style.display = 'flex';
+        const partner = getPartnerProfile();
+        document.getElementById('chatPartnerName').innerText = partner.name;
+        document.getElementById('chatPartnerAvatar').src = partner.avatar_url;
+        lucide.createIcons();
+    }
+
+    /* ===== LIGHTBOX ===== */
+    function openChatPhotoLightbox(url) {
+        if (!url) return;
+        triggerHaptic();
+        const modal = document.getElementById('chatPhotoLightboxModal');
+        const img = document.getElementById('chatLightboxImg');
+        const dl = document.getElementById('chatLightboxDownloadBtn');
+        if (modal && img) {
+            img.src = url;
+            if (dl) dl.href = url;
+            modal.classList.remove('hidden');
+            lucide.createIcons();
+        }
+    }
+
+    function closeChatPhotoLightbox() {
+        document.getElementById('chatPhotoLightboxModal')?.classList.add('hidden');
+    }
+
+    /* ===== SWIPE TO REPLY & GESTURES ===== */
+    function handleMsgTouchStart(e, msgId, author, text, isMe) {
+        if (!e.touches || e.touches.length === 0) return;
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        const el = e.currentTarget;
+        el._msgData = { id: msgId, author: author, text: text, isMe: isMe };
+        el._swiped = false;
+    }
+
+    function handleMsgTouchMove(e, el) {
+        if (!touchStartX) return;
+        const currentX = e.touches[0].clientX;
+        const currentY = e.touches[0].clientY;
+        const diffX = currentX - touchStartX;
+        const diffY = Math.abs(currentY - touchStartY);
+
+        if (diffY < 25 && diffX > 8 && diffX < 85) {
+            el.style.transform = `translateX(${diffX * 0.7}px)`;
+            el.style.transition = 'none';
+            if (diffX > 40 && !el._swiped) {
+                el._swiped = true;
+                triggerHaptic();
+            }
+        }
+    }
+
+    function handleMsgTouchEnd(e, el, msgId, author, text) {
+        if (!el) return;
+        el.style.transition = 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
+        el.style.transform = 'translateX(0px)';
+        if (el._swiped) {
+            startReplyToMessage(msgId, author, text);
+        }
+        touchStartX = 0;
+        touchStartY = 0;
+        el._swiped = false;
+    }
+
+    function startReplyToMessage(msgId, author, text) {
+        triggerHaptic();
+        activeReplyTarget = { id: msgId, author: author, text: text };
+        const banner = document.getElementById('chatReplyBanner');
+        const authorEl = document.getElementById('chatReplyAuthor');
+        const previewEl = document.getElementById('chatReplyPreview');
+        if (banner && authorEl && previewEl) {
+            authorEl.innerText = `Respondiendo a ${author}`;
+            previewEl.innerText = text;
+            banner.classList.remove('hidden');
+            lucide.createIcons();
+        }
+        const input = document.getElementById('chatInput');
+        if (input) input.focus();
+    }
+
+    function cancelReplyToMessage() {
+        activeReplyTarget = null;
+        document.getElementById('chatReplyBanner')?.classList.add('hidden');
+    }
+
+    function openDeleteMsgModal(msgId) {
+        triggerHaptic();
+        pendingDeleteMsgId = msgId;
+        const modal = document.getElementById('deleteMsgModal');
+        if (modal) {
+            modal.classList.remove('hidden');
+            lucide.createIcons();
+        }
+    }
+
+    function closeDeleteMsgModal() {
+        pendingDeleteMsgId = null;
+        document.getElementById('deleteMsgModal')?.classList.add('hidden');
+    }
+
+    async function executeDeleteChatMessage() {
+        if (!pendingDeleteMsgId) return;
+        const targetId = pendingDeleteMsgId;
+        closeDeleteMsgModal();
+        triggerHaptic();
+
+        currentChatMessages = currentChatMessages.filter(m => m.id !== targetId);
+        localStorage.setItem('aura_chat_local', JSON.stringify(currentChatMessages.slice(-100)));
+        lastChatHash = '__FORCE_RERENDER__';
+        renderChatMessages();
+        toast('Mensaje eliminado', 'info');
+
+        try { await sb.from('messages').delete().eq('id', targetId); } catch(e) {}
+        try { await sb.from('posts').delete().eq('id', targetId); } catch(e) {}
+
+        try {
+            realtimeChannelGlobal?.send({
+                type: 'broadcast',
+                event: 'delete_message',
+                payload: { id: targetId }
+            });
+        } catch(e) {}
+    }
+
+    /* ===== VOICE NOTES ===== */
+    function togglePlayVoiceNote(btn, audioKey) {
+        triggerHaptic();
+        const audioSrc = (window._cachedAudios && window._cachedAudios[audioKey]) ? window._cachedAudios[audioKey] : audioKey;
+        if (!audioSrc) return toast('No se encontró el audio', 'error');
+
+        let player = btn._audioPlayer;
+        if (!player) {
+            player = new Audio(audioSrc);
+            player.preload = 'auto';
+            btn._audioPlayer = player;
+        }
+
+        const icon = btn.querySelector('.voice-play-icon');
+
+        if (currentPlayingAudio && currentPlayingAudio !== player) {
+            currentPlayingAudio.pause();
+            currentPlayingAudio.currentTime = 0;
+            document.querySelectorAll('.voice-play-icon').forEach(ic => ic.setAttribute('data-lucide', 'play'));
+            lucide.createIcons();
+        }
+
+        if (player.paused) {
+            player.play().then(() => {
+                currentPlayingAudio = player;
+                if (icon) { icon.setAttribute('data-lucide', 'pause'); lucide.createIcons(); }
+            }).catch(err => {
+                console.error('Audio playback error:', err);
+                toast('Error al reproducir audio', 'error');
+            });
+
+            player.onended = () => {
+                if (icon) { icon.setAttribute('data-lucide', 'play'); lucide.createIcons(); }
+                currentPlayingAudio = null;
+            };
+        } else {
+            player.pause();
+            if (icon) { icon.setAttribute('data-lucide', 'play'); lucide.createIcons(); }
+            currentPlayingAudio = null;
+        }
+    }
+
+    async function toggleAudioRecording() {
+        triggerHaptic();
+        if (chatMediaRecorder && chatMediaRecorder.state === 'recording') {
+            stopAndSendAudioRecording();
+            return;
+        }
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            chatAudioChunks = [];
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : 'audio/webm');
+            chatMediaRecorder = new MediaRecorder(stream, { mimeType });
+
+            chatMediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chatAudioChunks.push(e.data); };
+            chatMediaRecorder.start(100);
+
+            document.getElementById('chatNormalInputContainer').classList.add('hidden');
+            document.getElementById('chatRecordingContainer').classList.remove('hidden');
+
+            chatRecordStartTime = Date.now();
+            const timerEl = document.getElementById('chatRecordTimer');
+            chatRecordTimerInterval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - chatRecordStartTime) / 1000);
+                const m = Math.floor(elapsed / 60);
+                const s = elapsed % 60;
+                if (timerEl) timerEl.innerText = `${m}:${s < 10 ? '0' : ''}${s}`;
+            }, 500);
+
+            lucide.createIcons();
+        } catch(err) {
+            toast('Permiso de micrófono no disponible', 'error');
+        }
+    }
+
+    function cancelAudioRecording() {
+        triggerHaptic();
+        if (chatRecordTimerInterval) clearInterval(chatRecordTimerInterval);
+        if (chatMediaRecorder && chatMediaRecorder.state !== 'inactive') {
+            chatMediaRecorder.stop();
+            chatMediaRecorder.stream.getTracks().forEach(t => t.stop());
+        }
+        chatAudioChunks = [];
+        document.getElementById('chatRecordingContainer').classList.add('hidden');
+        document.getElementById('chatNormalInputContainer').classList.remove('hidden');
+    }
+
+    function stopAndSendAudioRecording() {
+        triggerHaptic();
+        if (chatRecordTimerInterval) clearInterval(chatRecordTimerInterval);
+        const durationSecs = Math.max(1, Math.round((Date.now() - chatRecordStartTime) / 1000));
+
+        if (chatMediaRecorder && chatMediaRecorder.state !== 'inactive') {
+            chatMediaRecorder.onstop = async () => {
+                const blob = new Blob(chatAudioChunks, { type: chatMediaRecorder.mimeType || 'audio/webm' });
+                chatMediaRecorder.stream.getTracks().forEach(t => t.stop());
+                
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const base64Audio = reader.result;
+                    handleSendChatMessage(`[AUDIO:${durationSecs}]${base64Audio}`);
+                };
+                reader.readAsDataURL(blob);
+            };
+            chatMediaRecorder.stop();
+        }
+
+        document.getElementById('chatRecordingContainer').classList.add('hidden');
+        document.getElementById('chatNormalInputContainer').classList.remove('hidden');
+    }
+
+    /* ===== CHAT MESSAGES ENGINE ===== */
+    async function loadChatMessages() {
+        if (!currentUser) return;
+        const partner = getPartnerProfile();
+
+        let serverMessages = [];
+        try {
+            const { data, error } = await sb.from('messages').select('*').order('created_at', { ascending: true }).limit(100);
+            if (!error && data && data.length > 0) serverMessages = serverMessages.concat(data);
+        } catch(e) {}
+
+        if (serverMessages.length === 0) {
+            try {
+                const { data: chatPosts } = await sb.from('posts').select('*').ilike('text', '%CHAT%').order('created_at', { ascending: true }).limit(100);
+                if (chatPosts) {
+                    const mapped = chatPosts.filter(p => p.text?.includes('[CHAT]')).map(p => ({
+                        id: p.id,
+                        sender_id: p.user_id,
+                        text: p.text.replace(/^\[CHAT\]\s*/, ''),
+                        created_at: p.created_at
+                    }));
+                    serverMessages = serverMessages.concat(mapped);
+                }
+            } catch(e) {}
+        }
+
+        const localChat = JSON.parse(localStorage.getItem('aura_chat_local') || '[]');
+        const combined = [...localChat, ...currentChatMessages, ...serverMessages];
+
+        // Bulletproof Deduplication
+        const sorted = combined.filter(m => m && m.text).sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+        const finalMessages = [];
+        const seenIds = new Set();
+        const serverSignatures = [];
+
+        sorted.forEach(m => {
+            if (m.id && !m.id.startsWith('local_')) {
+                seenIds.add(m.id);
+                serverSignatures.push({
+                    sender: m.sender_id || m.user_id || 'me',
+                    text: m.text.replace(/^\[CHAT\]\s*/, '').trim(),
+                    time: new Date(m.created_at || Date.now()).getTime()
+                });
+            }
+        });
+
+        sorted.forEach(m => {
+            const cleanText = m.text.replace(/^\[CHAT\]\s*/, '').trim();
+            const sender = m.sender_id || m.user_id || 'me';
+            const msgTime = new Date(m.created_at || Date.now()).getTime();
+
+            if (m.id && m.id.startsWith('local_')) {
+                const hasServerMatch = serverSignatures.some(s => s.sender === sender && s.text === cleanText && Math.abs(s.time - msgTime) < 90000);
+                if (hasServerMatch) return;
+            }
+
+            if (m.id && seenIds.has(m.id) && m.id.startsWith('local_')) return;
+
+            const isDuplicate = finalMessages.some(r => {
+                const rSender = r.sender_id || r.user_id || 'me';
+                const rText = r.text.replace(/^\[CHAT\]\s*/, '').trim();
+                const rTime = new Date(r.created_at || Date.now()).getTime();
+                return rSender === sender && rText === cleanText && Math.abs(rTime - msgTime) < 40000;
+            });
+
+            if (!isDuplicate) {
+                m.text = cleanText;
+                finalMessages.push(m);
+            }
+        });
+
+        currentChatMessages = finalMessages;
+        localStorage.setItem('aura_chat_local', JSON.stringify(currentChatMessages.slice(-100)));
+        renderChatMessages();
+    }
+
+    function renderChatMessages() {
+        const list = document.getElementById('chatMessagesList');
+        if (!list) return;
+
+        const newHash = (currentChatMessages && currentChatMessages.length > 0) 
+            ? currentChatMessages.map(m => (m.id || '') + (m.text || '')).join('|')
+            : '__EMPTY__';
+
+        if (newHash === lastChatHash) return;
+        lastChatHash = newHash;
+
+        if (!currentChatMessages || currentChatMessages.length === 0) {
+            list.innerHTML = `
+                <div class="text-center py-14 space-y-2">
+                    <div class="w-12 h-12 rounded-full mx-auto bg-pink-100 dark:bg-orange-950/60 text-pink-500 dark:text-orange-400 flex items-center justify-center text-2xl shadow-sm">💌</div>
+                    <p class="text-xs font-bold opacity-70">Aún no hay mensajes.</p>
+                    <p class="text-[10px] opacity-50">¡Escribe el primer mensaje de amor hoy!</p>
+                </div>
+            `;
+            return;
+        }
+
+        const partner = getPartnerProfile();
+        let html = '';
+
+        currentChatMessages.forEach(m => {
+            try {
+                const isMe = (m.sender_id === currentUser.id || m.user_id === currentUser.id || m.sender_id === 'me');
+                const msgDate = m.created_at ? new Date(m.created_at) : new Date();
+                const timeStr = isNaN(msgDate.getTime()) ? '' : msgDate.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+                let rawText = m.text || '';
+                let replyQuoteHtml = '';
+                const replyMatch = rawText.match(/^\[REPLY:([^|]+)\|([\s\S]*?)\]([\s\S]*)$/);
+                if (replyMatch) {
+                    const qAuthor = replyMatch[1];
+                    const qPreview = replyMatch[2];
+                    rawText = replyMatch[3];
+                    replyQuoteHtml = `
+                        <div class="mb-1.5 p-1.5 px-2.5 rounded-xl text-[10.5px] ${isMe ? 'bg-white/20 text-white border-l-2 border-white' : 'bg-pink-500/10 dark:bg-orange-500/10 border-l-2 border-pink-500 dark:border-orange-400 text-neutral-800 dark:text-neutral-100'} backdrop-blur-sm shadow-xs space-y-0.5 select-none">
+                            <div class="flex items-center gap-1 font-bold text-[9.5px] ${isMe ? 'text-white' : 'text-pink-600 dark:text-orange-400'}">
+                                <i data-lucide="reply" class="w-2.5 h-2.5"></i>
+                                <span>${escapeHtml(qAuthor)}</span>
+                            </div>
+                            <p class="truncate opacity-85 text-[10px] leading-tight">${escapeHtml(qPreview)}</p>
+                        </div>
+                    `;
+                }
+
+                const isAudio = rawText && rawText.startsWith('[AUDIO');
+                const isPhoto = rawText && rawText.startsWith('[PHOTO]');
+                let contentHtml = '';
+                let previewSnippet = rawText;
+
+                if (isAudio) {
+                    const match = rawText.match(/^\[AUDIO:?(\d+)?\](.*)$/);
+                    const rawDuration = match && match[1] ? parseInt(match[1]) : 0;
+                    const durationMins = Math.floor(rawDuration / 60);
+                    const durationSecs = rawDuration % 60;
+                    const durationStr = rawDuration > 0 ? `${durationMins}:${durationSecs < 10 ? '0' : ''}${durationSecs}` : '0:03';
+                    const audioData = match ? match[2] : rawText.replace('[AUDIO]', '');
+                    const audioKey = 'aud_' + (m.id || (Date.now() + '_' + Math.random().toString(36).substr(2, 5)));
+                    window._cachedAudios[audioKey] = audioData;
+                    previewSnippet = `Nota de voz (${durationStr})`;
+
+                    contentHtml = `
+                        ${replyQuoteHtml}
+                        <div class="flex items-center gap-2 py-0.5">
+                            <button onclick="togglePlayVoiceNote(this, '${audioKey}')" class="w-7 h-7 rounded-full ${isMe ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-gradient-to-tr from-pink-500 to-rose-500 dark:from-orange-500 dark:to-amber-500 text-white'} flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all flex-shrink-0 shadow-sm" title="Reproducir">
+                                <i data-lucide="play" class="w-3.5 h-3.5 voice-play-icon ml-0.5"></i>
+                            </button>
+                            <div class="flex flex-col justify-center gap-0.5 min-w-[85px]">
+                                <div class="flex items-center gap-[2.5px] h-3 opacity-90">
+                                    <span class="w-[2px] h-1.5 bg-current rounded-full"></span>
+                                    <span class="w-[2px] h-3 bg-current rounded-full"></span>
+                                    <span class="w-[2px] h-1.5 bg-current rounded-full"></span>
+                                    <span class="w-[2px] h-3.5 bg-current rounded-full animate-pulse"></span>
+                                    <span class="w-[2px] h-2.5 bg-current rounded-full"></span>
+                                    <span class="w-[2px] h-3 bg-current rounded-full"></span>
+                                    <span class="w-[2px] h-1.5 bg-current rounded-full"></span>
+                                    <span class="w-[2px] h-2 bg-current rounded-full"></span>
+                                </div>
+                                <span class="text-[8.5px] ${isMe ? 'text-white/75' : 'opacity-55'} font-mono leading-none">${durationStr}</span>
+                            </div>
+                        </div>
+                    `;
+                } else if (isPhoto) {
+                    const photoUrl = rawText.replace('[PHOTO]', '').trim();
+                    previewSnippet = 'Foto adjunta';
+                    contentHtml = `
+                        ${replyQuoteHtml}
+                        <div class="relative rounded-2xl overflow-hidden cursor-pointer shadow-md my-0.5 max-w-[260px] group/img" onclick="openChatPhotoLightbox('${photoUrl}')">
+                            <img src="${photoUrl}" class="w-full max-h-72 object-cover rounded-2xl group-hover/img:scale-103 transition-transform duration-300">
+                            <div class="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md text-[8.5px] text-white font-mono flex items-center gap-1 shadow-sm">
+                                <span>${timeStr}</span>
+                                ${isMe ? '<i data-lucide="check-check" class="w-3 h-3 text-white"></i>' : ''}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    contentHtml = `
+                        ${replyQuoteHtml}
+                        <p class="text-xs sm:text-sm font-medium leading-relaxed break-words">${escapeHtml(rawText)}</p>
+                    `;
+                }
+
+                const senderDisplayName = isMe ? 'Tú' : partner.name;
+                const safePreview = escapeHtml(previewSnippet.substring(0, 60));
+
+                if (isMe) {
+                    html += `
+                        <div class="relative group flex justify-end items-end gap-1.5 animate-slide-up"
+                             ontouchstart="handleMsgTouchStart(event, '${m.id}', '${senderDisplayName}', '${safePreview}', true)"
+                             ontouchmove="handleMsgTouchMove(event, this)"
+                             ontouchend="handleMsgTouchEnd(event, this, '${m.id}', '${senderDisplayName}', '${safePreview}')">
+                            
+                            <div class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 pb-1">
+                                <button onclick="startReplyToMessage('${m.id}', '${senderDisplayName}', '${safePreview}')" class="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-pink-500 transition-colors cursor-pointer" title="Responder">
+                                    <i data-lucide="reply" class="w-3.5 h-3.5"></i>
+                                </button>
+                                <button onclick="openDeleteMsgModal('${m.id}')" class="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-rose-500 transition-colors cursor-pointer" title="Eliminar mensaje">
+                                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+
+                            <div class="${isPhoto ? 'p-1 rounded-2xl rounded-br-sm' : (isAudio ? 'px-2.5 py-1.5 rounded-2xl rounded-br-sm' : 'px-3.5 py-2 rounded-2xl rounded-br-sm')} max-w-[82%] bg-gradient-to-tr from-pink-600 via-rose-500 to-pink-500 dark:from-orange-500 dark:via-orange-600 dark:to-amber-500 text-white shadow-md space-y-0.5">
+                                ${contentHtml}
+                                ${!isPhoto ? `
+                                <div class="flex items-center justify-end gap-1 text-[8.5px] text-white/80 font-mono">
+                                    <span>${timeStr}</span>
+                                    <i data-lucide="check-check" class="w-3 h-3"></i>
+                                </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="relative group flex justify-start items-end gap-2 animate-slide-up"
+                             ontouchstart="handleMsgTouchStart(event, '${m.id}', '${senderDisplayName}', '${safePreview}', false)"
+                             ontouchmove="handleMsgTouchMove(event, this)"
+                             ontouchend="handleMsgTouchEnd(event, this, '${m.id}', '${senderDisplayName}', '${safePreview}')">
+                            <img src="${partner.avatar_url}" class="w-6 h-6 rounded-full object-cover border border-pink-300 dark:border-orange-400 mb-1 flex-shrink-0 shadow-sm">
+                            <div class="${isPhoto ? 'p-1 rounded-2xl rounded-bl-sm' : (isAudio ? 'px-2.5 py-1.5 rounded-2xl rounded-bl-sm' : 'px-3.5 py-2 rounded-2xl rounded-bl-sm')} max-w-[82%] glass-card border border-pink-200/50 dark:border-orange-500/20 shadow-md space-y-0.5">
+                                ${contentHtml}
+                                ${!isPhoto ? `
+                                <div class="flex items-center justify-end text-[8.5px] opacity-50 font-mono">
+                                    <span>${timeStr}</span>
+                                </div>
+                                ` : ''}
+                            </div>
+
+                            <div class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 pb-1">
+                                <button onclick="startReplyToMessage('${m.id}', '${senderDisplayName}', '${safePreview}')" class="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-pink-500 transition-colors cursor-pointer" title="Responder">
+                                    <i data-lucide="reply" class="w-3.5 h-3.5"></i>
+                                </button>
+                                <button onclick="openDeleteMsgModal('${m.id}')" class="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-rose-500 transition-colors cursor-pointer" title="Eliminar mensaje">
+                                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }
+            } catch(msgErr) {}
+        });
+
+        list.innerHTML = html;
+        lucide.createIcons();
+        scrollChatToBottom(false);
+    }
+
+    function scrollChatToBottom(forceInstant = false) {
+        const list = document.getElementById('chatMessagesList');
+        if (!list) return;
+        if (forceInstant) list.scrollTop = list.scrollHeight;
+        else list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
+        setTimeout(() => { if (list) list.scrollTop = list.scrollHeight; }, 150);
+    }
+
+    function insertChatEmoji(emoji) {
+        const input = document.getElementById('chatInput');
+        if (!input) return;
+        input.value += emoji;
+        input.focus();
+        triggerHaptic();
+        handleChatTypingInput();
+    }
+
+    async function sendQuickHeart() {
+        triggerHaptic();
+        confetti({ particleCount: 30, spread: 60 });
+        await handleSendChatMessage('Te amo con todo mi corazón ❤️✨');
+    }
+
+    async function handleSendChatMessage(customText) {
+        const input = document.getElementById('chatInput');
+        const text = (customText || input?.value || '').trim();
+        if (!text) return;
+        if (!customText && input) input.value = '';
+
+        triggerHaptic();
+        playNotificationSound();
+
+        const partner = getPartnerProfile();
+        let payloadText = text;
+
+        if (activeReplyTarget) {
+            const cleanAuthor = activeReplyTarget.author || partner.name;
+            const cleanPreview = (activeReplyTarget.text || '').replace(/[|\]]/g, ' ').substring(0, 70);
+            payloadText = `[REPLY:${cleanAuthor}|${cleanPreview}]${text}`;
+            cancelReplyToMessage();
+        }
+
+        const tempMsg = {
+            id: 'local_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+            sender_id: currentUser.id,
+            text: payloadText,
+            created_at: new Date().toISOString()
+        };
+
+        currentChatMessages.push(tempMsg);
+        localStorage.setItem('aura_chat_local', JSON.stringify(currentChatMessages.slice(-100)));
+        renderChatMessages();
+
+        let insertedOk = false;
+        try {
+            const { error: msgErr } = await sb.from('messages').insert({
+                sender_id: currentUser.id,
+                receiver_id: partner.id,
+                text: payloadText
+            });
+            if (!msgErr) insertedOk = true;
+        } catch(e) {}
+
+        if (!insertedOk) {
+            try {
+                await sb.from('posts').insert({
+                    user_id: currentUser.id,
+                    text: `[CHAT] ${payloadText}`,
+                    photo_url: null,
+                    reactions: {}
+                });
+            } catch(e) {}
+        }
+
+        try {
+            realtimeChannelGlobal?.send({
+                type: 'broadcast',
+                event: 'new_message',
+                payload: { sender_id: currentUser.id, text: payloadText }
+            });
+        } catch(e) {}
+
+        setTimeout(() => loadChatMessages(), 1000);
+    }
+
+    async function handleSendChatImage(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        toast('Enviando imagen...', 'info');
+        triggerHaptic();
+
+        try {
+            const reader = new FileReader();
+            reader.onload = async () => {
+                const base64 = reader.result;
+                await handleSendChatMessage(`[PHOTO] ${base64}`);
+                toast('Foto enviada', 'success');
+            };
+            reader.readAsDataURL(file);
+        } catch(err) {
+            toast('Error al enviar la imagen', 'error');
+        }
+        e.target.value = '';
+    }
+
+    function handleChatTypingInput() {
+        const now = Date.now();
+        if (now - lastTypingBroadcast > 3000) {
+            lastTypingBroadcast = now;
+            try {
+                realtimeChannelGlobal?.send({
+                    type: 'broadcast',
+                    event: 'typing',
+                    payload: { user_id: currentUser.id, name: currentUser.name }
+                });
+            } catch(e) {}
+        }
+    }
+
+    function showPartnerTyping(partnerName) {
+        const statusEl = document.getElementById('chatPartnerStatus');
+        if (!statusEl) return;
+        statusEl.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-pink-500 dark:bg-orange-400 animate-ping"></span> <span class="text-pink-600 dark:text-orange-400 font-bold">escribiendo...</span>`;
+
+        if (partnerTypingResetTimeout) clearTimeout(partnerTypingResetTimeout);
+        partnerTypingResetTimeout = setTimeout(() => {
+            statusEl.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Chat Íntimo & Privado`;
+        }, 3500);
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.innerText = text || '';
+        return div.innerHTML;
+    }
+
+    /* ===== REALTIME SYNC ===== */
+    function setupRealtime() {
+        if (realtimeChannelGlobal) {
+            try { sb.removeChannel(realtimeChannelGlobal); } catch(e) {}
+        }
+
+        realtimeChannelGlobal = sb.channel('aura-chat-standalone');
+
+        realtimeChannelGlobal
+            .on('broadcast', { event: 'typing' }, payload => {
+                if (payload.payload && payload.payload.user_id !== currentUser.id) {
+                    showPartnerTyping(payload.payload.name || 'Tu pareja');
+                }
+            })
+            .on('broadcast', { event: 'new_message' }, payload => {
+                const data = payload.payload;
+                if (data && data.sender_id !== currentUser.id) {
+                    loadChatMessages();
+                    const author = getProfile(data.sender_id) || getPartnerProfile();
+                    const isAudio = data.text && data.text.startsWith('[AUDIO');
+                    const isPhoto = data.text && data.text.startsWith('[PHOTO]');
+                    let preview = data.text || '';
+                    if (isAudio) preview = 'Nota de voz';
+                    else if (isPhoto) preview = 'Foto adjunta';
+
+                    if (document.hidden) {
+                        showInAppNotification({
+                            title: author.name,
+                            message: preview,
+                            avatar: author.avatar_url,
+                            icon: isAudio ? 'mic' : (isPhoto ? 'image' : 'message-circle'),
+                            onClick: () => window.focus()
+                        });
+                        sendNativeNotification(author.name, preview, author.avatar_url);
+                    } else {
+                        playNotificationSound();
+                    }
+                }
+            })
+            .on('broadcast', { event: 'delete_message' }, payload => {
+                const targetId = payload.payload?.id;
+                if (targetId) {
+                    currentChatMessages = currentChatMessages.filter(m => m.id !== targetId);
+                    localStorage.setItem('aura_chat_local', JSON.stringify(currentChatMessages.slice(-100)));
+                    lastChatHash = '__FORCE_RERENDER__';
+                    renderChatMessages();
+                }
+            })
+            .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, payload => {
+                const targetId = payload.old?.id;
+                if (targetId) {
+                    currentChatMessages = currentChatMessages.filter(m => m.id !== targetId);
+                    localStorage.setItem('aura_chat_local', JSON.stringify(currentChatMessages.slice(-100)));
+                    lastChatHash = '__FORCE_RERENDER__';
+                    renderChatMessages();
+                }
+            })
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
+                loadChatMessages();
+                if (payload.new && payload.new.sender_id !== currentUser.id) {
+                    const author = getProfile(payload.new.sender_id) || getPartnerProfile();
+                    const isAudio = payload.new.text && payload.new.text.startsWith('[AUDIO');
+                    const isPhoto = payload.new.text && payload.new.text.startsWith('[PHOTO]');
+                    const previewText = isAudio ? 'Nota de voz' : (isPhoto ? 'Foto adjunta' : payload.new.text);
+                    if (document.hidden) {
+                        showInAppNotification({
+                            title: author.name,
+                            message: previewText,
+                            avatar: author.avatar_url,
+                            icon: isAudio ? 'mic' : (isPhoto ? 'image' : 'message-circle'),
+                            onClick: () => window.focus()
+                        });
+                        sendNativeNotification(author.name, previewText, author.avatar_url);
+                    } else {
+                        playNotificationSound();
+                    }
+                }
+            })
+            .subscribe();
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') loadChatMessages();
+        });
+    }
+
+    /* ===== INIT ===== */
+    window.onload = async function() {
+        initTheme();
+        lucide.createIcons();
+
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js?v=1.0').then(reg => {
+                reg.update();
+            }).catch(e => {});
+
+            navigator.serviceWorker.addEventListener('message', event => {
+                if (event.data && event.data.type === 'NOTIFICATION_REPLY' && event.data.text) {
+                    handleSendChatMessage(event.data.text);
+                }
+            });
+        }
+
+        const savedUser = localStorage.getItem('aura_chat_user');
+        if (savedUser) {
+            try {
+                currentUser = JSON.parse(savedUser);
+            } catch(e) {
+                document.getElementById('loadingScreen').style.display = 'none';
+                document.getElementById('authScreen').style.display = 'flex';
+                return;
+            }
+
+            await loadAllProfiles();
+            showApp();
+            loadChatMessages();
+            setupRealtime();
+        } else {
+            document.getElementById('loadingScreen').style.display = 'none';
+            document.getElementById('authScreen').style.display = 'flex';
+        }
+    };
+    </script>
+</body>
+</html>
