@@ -915,7 +915,7 @@
             } catch(e) {}
         }
 
-        const localChat = JSON.parse(localStorage.getItem('aura_chat_local') || '[]');
+        const localChat = JSON.parse(localStorage.getItem('aura_local_chat') || '[]');
         const combined = [...localChat, ...currentChatMessages, ...serverMessages];
 
         // Bulletproof Deduplication
@@ -961,7 +961,7 @@
         });
 
         currentChatMessages = finalMessages;
-        localStorage.setItem('aura_chat_local', JSON.stringify(currentChatMessages.slice(-100)));
+        localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
         renderChatMessages();
     }
 
@@ -1186,7 +1186,7 @@
         };
 
         currentChatMessages.push(tempMsg);
-        localStorage.setItem('aura_chat_local', JSON.stringify(currentChatMessages.slice(-100)));
+        localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
         renderChatMessages();
 
         let insertedOk = false;
@@ -1278,7 +1278,7 @@
             try { sb.removeChannel(realtimeChannelGlobal); } catch(e) {}
         }
 
-        realtimeChannelGlobal = sb.channel('aura-chat-standalone');
+        realtimeChannelGlobal = sb.channel('aura-realtime-cloud');
 
         realtimeChannelGlobal
             .on('broadcast', { event: 'typing' }, payload => {
@@ -1294,8 +1294,14 @@
                     const isAudio = data.text && data.text.startsWith('[AUDIO');
                     const isPhoto = data.text && data.text.startsWith('[PHOTO]');
                     let preview = data.text || '';
-                    if (isAudio) preview = 'Nota de voz';
-                    else if (isPhoto) preview = 'Foto adjunta';
+                    if (isAudio) {
+                        const match = data.text.match(/^\[AUDIO:?(\d+)?\]/);
+                        const rawDur = match && match[1] ? parseInt(match[1]) : 0;
+                        const durStr = rawDur > 0 ? ` (0:${rawDur < 10 ? '0' : ''}${rawDur})` : '';
+                        preview = `🎤 Mensaje de voz${durStr}`;
+                    } else if (isPhoto) {
+                        preview = '📸 Foto';
+                    }
 
                     if (document.hidden) {
                         showInAppNotification({
@@ -1315,7 +1321,7 @@
                 const targetId = payload.payload?.id;
                 if (targetId) {
                     currentChatMessages = currentChatMessages.filter(m => m.id !== targetId);
-                    localStorage.setItem('aura_chat_local', JSON.stringify(currentChatMessages.slice(-100)));
+                    localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
                     lastChatHash = '__FORCE_RERENDER__';
                     renderChatMessages();
                 }
@@ -1324,7 +1330,7 @@
                 const targetId = payload.old?.id;
                 if (targetId) {
                     currentChatMessages = currentChatMessages.filter(m => m.id !== targetId);
-                    localStorage.setItem('aura_chat_local', JSON.stringify(currentChatMessages.slice(-100)));
+                    localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
                     lastChatHash = '__FORCE_RERENDER__';
                     renderChatMessages();
                 }
@@ -1335,7 +1341,15 @@
                     const author = getProfile(payload.new.sender_id) || getPartnerProfile();
                     const isAudio = payload.new.text && payload.new.text.startsWith('[AUDIO');
                     const isPhoto = payload.new.text && payload.new.text.startsWith('[PHOTO]');
-                    const previewText = isAudio ? 'Nota de voz' : (isPhoto ? 'Foto adjunta' : payload.new.text);
+                    let previewText = payload.new.text || '';
+                    if (isAudio) {
+                        const match = payload.new.text.match(/^\[AUDIO:?(\d+)?\]/);
+                        const rawDur = match && match[1] ? parseInt(match[1]) : 0;
+                        const durStr = rawDur > 0 ? ` (0:${rawDur < 10 ? '0' : ''}${rawDur})` : '';
+                        previewText = `🎤 Mensaje de voz${durStr}`;
+                    } else if (isPhoto) {
+                        previewText = '📸 Foto';
+                    }
                     if (document.hidden) {
                         showInAppNotification({
                             title: author.name,
