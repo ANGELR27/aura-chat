@@ -819,6 +819,89 @@
         }
     }
 
+    async function sendNativeCallNotification(callerName, mode, avatar) {
+        const isVideo = mode === 'video';
+        const callTitle = `📞 ${isVideo ? 'Videollamada' : 'Llamada de Voz'} Entrante`;
+        const callBody = `${callerName} te está llamando... Toca para contestar`;
+        const avatarUrl = avatar || './icon-192.png';
+
+        // 1. Capacitor Native Android System Tray (Heads-Up Popup with Sound & Vibration outside app)
+        if (window.Capacitor?.Plugins?.LocalNotifications) {
+            try {
+                await window.Capacitor.Plugins.LocalNotifications.schedule({
+                    notifications: [
+                        {
+                            title: callTitle,
+                            body: callBody,
+                            id: 999999,
+                            schedule: { at: new Date(Date.now() + 50) },
+                            sound: 'beep.wav',
+                            ongoing: true,
+                            autoCancel: false,
+                            actionTypeId: 'INCOMING_CALL',
+                            extra: { type: 'CALL_OFFER', mode: mode }
+                        }
+                    ]
+                });
+            } catch(e) {
+                console.warn('[ROAN] Call LocalNotification error:', e);
+            }
+        }
+
+        // 2. ServiceWorker Registration Notification (PWA / Android Background)
+        if ('serviceWorker' in navigator) {
+            try {
+                const reg = await navigator.serviceWorker.ready;
+                if (reg && reg.showNotification) {
+                    await reg.showNotification(callTitle, {
+                        body: callBody,
+                        icon: avatarUrl,
+                        badge: './badge-96.png',
+                        tag: 'roan-call-incoming',
+                        requireInteraction: true,
+                        renotify: true,
+                        vibrate: [500, 200, 500, 200, 500, 200],
+                        data: { url: window.location.href, isCall: true },
+                        actions: [
+                            { action: 'answer_call', title: '📞 Contestar' },
+                            { action: 'reject_call', title: '❌ Rechazar' }
+                        ]
+                    });
+                }
+            } catch(e) {}
+        }
+
+        // 3. Direct Window Notification fallback
+        try {
+            if ('Notification' in window && Notification.permission === 'granted') {
+                const notif = new Notification(callTitle, {
+                    body: callBody,
+                    icon: avatarUrl,
+                    tag: 'roan-call-incoming',
+                    requireInteraction: true
+                });
+                notif.onclick = () => { window.focus(); acceptIncomingCall(); notif.close(); };
+            }
+        } catch(e) {}
+    }
+
+    async function dismissNativeCallNotification() {
+        if (window.Capacitor?.Plugins?.LocalNotifications) {
+            try {
+                await window.Capacitor.Plugins.LocalNotifications.cancel({
+                    notifications: [{ id: 999999 }]
+                });
+            } catch(e) {}
+        }
+        if ('serviceWorker' in navigator) {
+            try {
+                const reg = await navigator.serviceWorker.ready;
+                const notifs = await reg.getNotifications({ tag: 'roan-call-incoming' });
+                notifs.forEach(n => n.close());
+            } catch(e) {}
+        }
+    }
+
     async function initiateWebRTCCall(mode = 'video') {
         if (!currentUser) return toast('Inicia sesión para llamar', 'error');
         triggerHaptic();
@@ -898,10 +981,14 @@
         document.getElementById('incomingCallModal').classList.remove('hidden');
         lucide.createIcons();
         startRingtoneSound();
+
+        // Native Android Heads-Up Notification outside the app with caller name & photo!
+        sendNativeCallNotification(caller.name, payload.mode, caller.avatar_url);
     }
 
     async function acceptIncomingCall() {
         if (!pendingIncomingOffer) return;
+        dismissNativeCallNotification();
         stopAllCallSounds();
         triggerHaptic();
         const offerPayload = pendingIncomingOffer;
@@ -957,6 +1044,7 @@
     }
 
     function rejectIncomingCall() {
+        dismissNativeCallNotification();
         stopAllCallSounds();
         triggerHaptic();
         pendingIncomingOffer = null;
@@ -2067,9 +2155,11 @@
                 }
             })
             .on('broadcast', { event: 'call_end' }, () => {
+                dismissNativeCallNotification();
                 endActiveCall(false);
             })
             .on('broadcast', { event: 'call_reject' }, payload => {
+                dismissNativeCallNotification();
                 stopAllCallSounds();
                 endActiveCall(false);
                 toast(payload.payload?.reason === 'busy' ? 'Línea ocupada' : 'Llamada rechazada', 'info');
@@ -2191,14 +2281,34 @@
         initTheme();
         lucide.createIcons();
 
+        // Register Capacitor LocalNotifications action handler
+        if (window.Capacitor?.Plugins?.LocalNotifications) {
+            try {
+                window.Capacitor.Plugins.LocalNotifications.addListener('localNotificationActionPerformed', (notification) => {
+                    console.log('[ROAN] LocalNotification action:', notification);
+                    if (notification.notification?.id === 999999 || notification.notification?.extra?.type === 'CALL_OFFER') {
+                        if (pendingIncomingOffer) {
+                            acceptIncomingCall();
+                        }
+                    }
+                });
+            } catch(e) {}
+        }
+
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js?v=1.0').then(reg => {
+            navigator.serviceWorker.register('sw.js?v=2.0').then(reg => {
                 reg.update();
             }).catch(e => {});
 
             navigator.serviceWorker.addEventListener('message', event => {
                 if (event.data && event.data.type === 'NOTIFICATION_REPLY' && event.data.text) {
                     handleSendChatMessage(event.data.text);
+                } else if (event.data && event.data.type === 'ACCEPT_CALL') {
+                    if (pendingIncomingOffer) {
+                        acceptIncomingCall();
+                    }
+                } else if (event.data && event.data.type === 'REJECT_CALL') {
+                    rejectIncomingCall();
                 }
             });
         }
