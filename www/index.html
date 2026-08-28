@@ -524,9 +524,10 @@
 
     <!-- ========================== APP JAVASCRIPT ========================== -->
     <script>
-    const SUPABASE_URL = 'https://jojfuyvbbogxszlczhca.supabase.co';
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvamZ1eXZiYm9neHN6bGN6aGNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMwNDI2MDUsImV4cCI6MjA2ODYxODYwNX0.m5l9W6W44r2kZg491sY709xYc2mY9d7K9z5vK8bW9vU';
-    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    /* ===== SUPABASE REMOTE CLIENT ===== */
+    const SUPABASE_URL = 'https://vrhicfjugclcchvckzkw.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZyaGljZmp1Z2NsY2NodmNremt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc3ODIxMjEsImV4cCI6MjEwMzM1ODEyMX0.CTjIV7Gpr20u60byAFkH1v9D5onuNVA5pBOyqrfbYMg';
+    const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     /* ===== STATE & HELPERS ===== */
     let currentUser = null;
@@ -1079,8 +1080,8 @@
 
     /* ===== AUTH & PROFILES ===== */
     const PRESETS = {
-        roxana: { id: '00000000-0000-0000-0000-000000000001', name: 'Roxana', email: 'roxana@aura.app', avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80' },
-        angel: { id: '00000000-0000-0000-0000-000000000002', name: 'Ángel', email: 'angel@aura.app', avatar_url: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=400&q=80' }
+        roxana: { id: 'a1000000-0000-0000-0000-000000000001', name: 'Roxana', email: 'roxana@aura.app', avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80' },
+        angel: { id: 'a1000000-0000-0000-0000-000000000002', name: 'Ángel', email: 'angel@aura.app', avatar_url: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=400&q=80' }
     };
 
     async function loadAllProfiles() {
@@ -1140,6 +1141,10 @@
             localStorage.setItem('aura_chat_user', JSON.stringify(currentUser));
             localStorage.setItem('aura_cloud_user', JSON.stringify(currentUser));
         }
+
+        try {
+            localStorage.setItem('roan_cached_profiles', JSON.stringify(allProfiles));
+        } catch(e) {}
 
         const partner = getPartnerProfile();
         const partnerNameEl = document.getElementById('chatPartnerName');
@@ -1444,24 +1449,22 @@
 
         let serverMessages = [];
         try {
-            const { data, error } = await sb.from('messages').select('*').order('created_at', { ascending: true }).limit(100);
+            const { data, error } = await sb.from('messages').select('*').order('created_at', { ascending: true }).limit(200);
             if (!error && data && data.length > 0) serverMessages = serverMessages.concat(data);
         } catch(e) {}
 
-        if (serverMessages.length === 0) {
-            try {
-                const { data: chatPosts } = await sb.from('posts').select('*').ilike('text', '%CHAT%').order('created_at', { ascending: true }).limit(100);
-                if (chatPosts) {
-                    const mapped = chatPosts.filter(p => p.text?.includes('[CHAT]')).map(p => ({
-                        id: p.id,
-                        sender_id: p.user_id,
-                        text: p.text.replace(/^\[CHAT\]\s*/, ''),
-                        created_at: p.created_at
-                    }));
-                    serverMessages = serverMessages.concat(mapped);
-                }
-            } catch(e) {}
-        }
+        try {
+            const { data: chatPosts } = await sb.from('posts').select('*').ilike('text', '%CHAT%').order('created_at', { ascending: true }).limit(200);
+            if (chatPosts && chatPosts.length > 0) {
+                const mapped = chatPosts.filter(p => p.text?.includes('[CHAT]')).map(p => ({
+                    id: p.id,
+                    sender_id: p.user_id,
+                    text: p.text.replace(/^\[CHAT\]\s*/, ''),
+                    created_at: p.created_at
+                }));
+                serverMessages = serverMessages.concat(mapped);
+            }
+        } catch(e) {}
 
         const localChat = JSON.parse(localStorage.getItem('aura_local_chat') || '[]');
         const combined = [...localChat, ...currentChatMessages, ...serverMessages];
@@ -1981,6 +1984,11 @@
                     } else {
                         playNotificationSound();
                     }
+                }
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, payload => {
+                if (payload.new && payload.new.text && payload.new.text.includes('[CHAT]')) {
+                    loadChatMessages();
                 }
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, payload => {
