@@ -1562,29 +1562,24 @@
             }
         });
 
+        const finalSeenIds = new Set();
         sorted.forEach(m => {
             const cleanText = m.text.replace(/^\[CHAT\]\s*/, '').trim();
             const sender = m.sender_id || m.user_id || 'me';
             const msgTime = new Date(m.created_at || Date.now()).getTime();
 
+            // Skip if exact ID already included
+            if (m.id && finalSeenIds.has(m.id)) return;
+
+            // If it's a temporary local message, only skip if the server version has already arrived
             if (m.id && m.id.startsWith('local_')) {
                 const hasServerMatch = serverSignatures.some(s => s.sender === sender && s.text === cleanText && Math.abs(s.time - msgTime) < 90000);
                 if (hasServerMatch) return;
             }
 
-            if (m.id && seenIds.has(m.id) && m.id.startsWith('local_')) return;
-
-            const isDuplicate = finalMessages.some(r => {
-                const rSender = r.sender_id || r.user_id || 'me';
-                const rText = r.text.replace(/^\[CHAT\]\s*/, '').trim();
-                const rTime = new Date(r.created_at || Date.now()).getTime();
-                return rSender === sender && rText === cleanText && Math.abs(rTime - msgTime) < 40000;
-            });
-
-            if (!isDuplicate) {
-                m.text = cleanText;
-                finalMessages.push(m);
-            }
+            if (m.id) finalSeenIds.add(m.id);
+            m.text = cleanText;
+            finalMessages.push(m);
         });
 
         currentChatMessages = finalMessages;
@@ -1931,6 +1926,8 @@
     }
 
     /* ===== REALTIME SYNC ===== */
+    let chatPollingInterval = null;
+
     function setupRealtime() {
         if (realtimeChannelGlobal) {
             try { sb.removeChannel(realtimeChannelGlobal); } catch(e) {}
@@ -1944,58 +1941,9 @@
                     showPartnerTyping(payload.payload.name || 'Tu pareja');
                 }
             })
-            .on('broadcast', { event: 'new_message' }, payload => {
-                const data = payload.payload;
-                if (data && data.sender_id !== currentUser?.id) {
-                    hidePartnerTyping();
-                    const incomingMsg = {
-                        id: data.id || ('rt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
-                        sender_id: data.sender_id,
-                        text: data.text,
-                        created_at: data.created_at || new Date().toISOString()
-                    };
-                    
-                    const isAlreadyThere = currentChatMessages.some(m => 
-                        (m.id && m.id === incomingMsg.id) || 
-                        (m.sender_id === incomingMsg.sender_id && m.text === incomingMsg.text && Math.abs(new Date(m.created_at || 0) - new Date(incomingMsg.created_at)) < 15000)
-                    );
-                    
-                    if (!isAlreadyThere) {
-                        currentChatMessages.push(incomingMsg);
-                        localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
-                        lastChatHash = '__FORCE_RERENDER__';
-                        renderChatMessages();
-                    }
-
-                    setTimeout(() => loadChatMessages(), 600);
-
-                    const author = getProfile(data.sender_id) || getPartnerProfile();
-                    const isAudio = data.text && data.text.startsWith('[AUDIO');
-                    const isPhoto = data.text && data.text.startsWith('[PHOTO]');
-                    let preview = data.text || '';
-                    if (isAudio) {
-                        const match = data.text.match(/^\[AUDIO:?(\d+)?\]/);
-                        const rawDur = match && match[1] ? parseInt(match[1]) : 0;
-                        const durStr = rawDur > 0 ? ` (0:${rawDur < 10 ? '0' : ''}${rawDur})` : '';
-                        preview = `🎤 Mensaje de voz${durStr}`;
-                    } else if (isPhoto) {
-                        preview = '📸 Foto';
-                    }
-
-                    playNotificationSound();
-                    if (document.hidden) {
-                        sendNativeNotification(author.name, preview, author.avatar_url);
-                    } else {
-                        showInAppNotification({
-                            title: author.name,
-                            message: preview,
-                            avatar: author.avatar_url,
-                            icon: isAudio ? 'mic' : (isPhoto ? 'image' : 'message-circle'),
-                            onClick: () => window.focus()
-                        });
-                    }
-                }
-            })
+            /* NOTE: broadcast new_message REMOVED - diagnostic proved it NEVER fires.
+               Messages are delivered ONLY via postgres_changes INSERT on posts table,
+               which IS confirmed working. */
             .on('broadcast', { event: 'call_offer' }, payload => {
                 if (payload.payload) handleIncomingCallOffer(payload.payload);
             })
@@ -2040,6 +1988,7 @@
                     renderChatMessages();
                 }
             })
+            /* === PRIMARY MESSAGE DELIVERY: postgres_changes on posts table === */
             .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'posts' }, payload => {
                 const targetId = payload.old?.id;
                 if (targetId) {
@@ -2062,17 +2011,26 @@
                         created_at: newRow.created_at
                     };
 
-                    const isAlreadyThere = currentChatMessages.some(m => 
-                        (m.id && m.id === incomingMsg.id) || 
-                        (m.sender_id === incomingMsg.sender_id && m.text === incomingMsg.text && Math.abs(new Date(m.created_at || 0) - new Date(incomingMsg.created_at)) < 15000)
+                    // Deduplicate: replace local_ temp message or skip if already present
+                    const localIdx = currentChatMessages.findIndex(m => 
+                        m.id && m.id.startsWith('local_') && 
+                        m.sender_id === incomingMsg.sender_id && 
+                        m.text === incomingMsg.text
                     );
-
-                    if (!isAlreadyThere) {
-                        currentChatMessages.push(incomingMsg);
-                        localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
-                        lastChatHash = '__FORCE_RERENDER__';
-                        renderChatMessages();
+                    
+                    if (localIdx >= 0) {
+                        // Replace temp local message with real server message
+                        currentChatMessages[localIdx] = incomingMsg;
+                    } else {
+                        const alreadyExists = currentChatMessages.some(m => m.id === incomingMsg.id);
+                        if (!alreadyExists) {
+                            currentChatMessages.push(incomingMsg);
+                        }
                     }
+                    
+                    localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
+                    lastChatHash = '__FORCE_RERENDER__';
+                    renderChatMessages();
 
                     if (!isFromMe) {
                         hidePartnerTyping();
@@ -2084,6 +2042,7 @@
                         else if (isPhoto) previewText = '📸 Foto';
 
                         playNotificationSound();
+                        triggerHaptic(80);
 
                         if (document.hidden) {
                             sendNativeNotification(author.name, previewText, author.avatar_url);
@@ -2114,11 +2073,23 @@
                     renderChatMessages();
                 }
             })
-            .subscribe();
+            .subscribe((status) => {
+                console.log('[ROAN] Realtime channel status:', status);
+            });
 
+        // Visibility change: reload on focus
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') loadChatMessages();
         });
+
+        // FALLBACK POLLING: every 8 seconds, silently check for new messages
+        // This catches anything postgres_changes might miss (reconnections, etc.)
+        if (chatPollingInterval) clearInterval(chatPollingInterval);
+        chatPollingInterval = setInterval(() => {
+            if (!document.hidden && currentUser) {
+                loadChatMessages();
+            }
+        }, 8000);
     }
 
     /* ===== INIT ===== */
