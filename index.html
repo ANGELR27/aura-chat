@@ -297,6 +297,9 @@
                     </div>
                 </div>
                 <div class="flex items-center gap-1 sm:gap-1.5">
+                    <button onclick="testNotificationNow()" class="p-2 rounded-xl glass hover:scale-105 active:scale-95 transition-all text-pink-600 dark:text-orange-400 cursor-pointer shadow-sm" title="Probar / Activar Notificaciones 🔔">
+                        <i data-lucide="bell" class="w-4.5 h-4.5"></i>
+                    </button>
                     <button onclick="initiateWebRTCCall('audio')" class="p-2 rounded-xl glass hover:scale-105 active:scale-95 transition-all text-emerald-600 dark:text-emerald-400 cursor-pointer shadow-sm" title="Llamada de Voz">
                         <i data-lucide="phone" class="w-4.5 h-4.5"></i>
                     </button>
@@ -692,9 +695,43 @@
             try {
                 const res = await Notification.requestPermission();
                 if (res === 'granted') {
-                    toast('Notificaciones activadas en el celular 🔔', 'success');
+                    toast('¡Notificaciones activadas con éxito! 🔔', 'success');
+                    confetti({ particleCount: 30, spread: 60 });
                 }
             } catch(e) {}
+        }
+    }
+
+    async function testNotificationNow() {
+        triggerHaptic();
+        if (!('Notification' in window)) {
+            return toast('Tu navegador o dispositivo no soporta notificaciones nativas', 'error');
+        }
+        if (Notification.permission !== 'granted') {
+            const res = await Notification.requestPermission();
+            if (res !== 'granted') {
+                return toast('Debes permitir las notificaciones en los ajustes del dispositivo', 'error');
+            }
+        }
+        toast('Enviando notificación de prueba... 🔔', 'info');
+        const partner = getPartnerProfile();
+        await sendNativeNotification(`Prueba de ROAN 💕`, `¡Las notificaciones están funcionando perfectamente con ${partner.name}! ✨`, partner.avatar_url);
+    }
+
+    async function forceEnableNotifications() {
+        if (!('Notification' in window)) return toast('Este navegador no soporta notificaciones', 'error');
+        triggerHaptic();
+        try {
+            const res = await Notification.requestPermission();
+            if (res === 'granted') {
+                toast('¡Notificaciones activadas con éxito! 🔔', 'success');
+                confetti({ particleCount: 30, spread: 60 });
+                await sendNativeNotification('ROAN Conectado 💕', 'Notificaciones activadas y listas para recibir mensajes ✨');
+            } else {
+                toast('Permiso de notificaciones no concedido', 'info');
+            }
+        } catch(e) {
+            console.warn(e);
         }
     }
 
@@ -717,9 +754,16 @@
             tag: 'roan-msg-' + Date.now(),
             renotify: true,
             vibrate: [200, 100, 200],
-            data: { url: window.location.href }
+            data: { url: window.location.href },
+            actions: isMsg ? [
+                { action: 'reply', type: 'text', title: 'Responder', placeholder: 'Escribe tu respuesta...' },
+                { action: 'open_chat', title: 'Abrir Chat' }
+            ] : [
+                { action: 'open_app', title: 'Abrir ROAN' }
+            ]
         };
 
+        // 1. Primary: ServiceWorker Registration Notification (Best for Android & PWAs)
         if ('serviceWorker' in navigator) {
             try {
                 const reg = await navigator.serviceWorker.ready;
@@ -727,14 +771,19 @@
                     await reg.showNotification(title, notifOptions);
                     return;
                 }
-            } catch(e) {}
+            } catch(e) {
+                console.warn('SW showNotification fallback:', e);
+            }
         }
 
+        // 2. Direct Window Notification fallback
         try {
             const notif = new Notification(title, notifOptions);
             notif.onclick = () => { window.focus(); notif.close(); };
             setTimeout(() => notif.close(), 6000);
-        } catch(e) {}
+        } catch(e) {
+            console.warn('Window Notification error:', e);
+        }
     }
 
     /* ===== WEBRTC VOICE & VIDEO CALLS ENGINE ===== */
