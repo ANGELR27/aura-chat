@@ -13,18 +13,22 @@
     <meta name="theme-color" content="#0a0a0c" id="themeColorMeta">
     <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
     <link rel="apple-touch-icon" sizes="192x192" href="./icon-192.png">
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tailwind CSS (Local + CDN fallback) -->
+    <script src="./tailwind.min.js"></script>
+    <script>if (!window.tailwind) document.write('<script src="https://cdn.tailwindcss.com"><\/script>')</script>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Supabase JS Client -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <!-- Canvas Confetti -->
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+    <!-- Lucide Icons (Local + CDN fallback) -->
+    <script src="./lucide.min.js"></script>
+    <script>if (!window.lucide) document.write('<script src="https://unpkg.com/lucide@latest"><\/script>')</script>
+    <!-- Supabase JS Client (Local + CDN fallback) -->
+    <script src="./supabase.min.js"></script>
+    <script>if (!window.supabase) document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>')</script>
+    <!-- Canvas Confetti (Local + CDN fallback) -->
+    <script src="./confetti.min.js"></script>
+    <script>if (!window.confetti) document.write('<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"><\/script>')</script>
 
     <script>
         tailwind.config = {
@@ -526,7 +530,7 @@
     /* ===== SUPABASE REMOTE CLIENT ===== */
     const SUPABASE_URL = 'https://vrhicfjugclcchvckzkw.supabase.co';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZyaGljZmp1Z2NsY2NodmNremt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc3ODIxMjEsImV4cCI6MjEwMzM1ODEyMX0.CTjIV7Gpr20u60byAFkH1v9D5onuNVA5pBOyqrfbYMg';
-    const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const sb = (window.supabase && window.supabase.createClient) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : (typeof supabase !== 'undefined' && supabase.createClient ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null);
 
     /* ===== STATE & HELPERS ===== */
     let currentUser = null;
@@ -2330,20 +2334,25 @@
     }
 
     /* ===== INIT ===== */
-    window.onload = async function() {
-        initTheme();
-        lucide.createIcons();
+    let hasBooted = false;
+    async function bootApp() {
+        if (hasBooted) return;
+        hasBooted = true;
 
-        // Safety fallback: always dismiss loading spinner within 1.2s MAX
+        initTheme();
+        if (window.lucide && window.lucide.createIcons) lucide.createIcons();
+
+        // Safety fallback: always dismiss loading spinner within 400ms MAX
         setTimeout(() => {
             const loader = document.getElementById('loadingScreen');
             if (loader && loader.style.display !== 'none') {
                 loader.style.display = 'none';
                 if (!currentUser) {
-                    document.getElementById('authScreen').style.display = 'flex';
+                    const auth = document.getElementById('authScreen');
+                    if (auth) auth.style.display = 'flex';
                 }
             }
-        }, 1200);
+        }, 400);
 
         // Preload profiles from local cache immediately
         allProfiles[PRESETS.roxana.id] = { ...PRESETS.roxana };
@@ -2352,7 +2361,9 @@
         allProfiles['angel'] = allProfiles[PRESETS.angel.id];
 
         // Register notifications
-        initDeviceNotificationChannels();
+        try {
+            initDeviceNotificationChannels();
+        } catch(e) {}
 
         // Register Capacitor LocalNotifications action handler
         if (window.Capacitor?.Plugins?.LocalNotifications) {
@@ -2401,10 +2412,19 @@
             loadChatMessages();
             setupRealtime();
         } else {
-            document.getElementById('loadingScreen').style.display = 'none';
-            document.getElementById('authScreen').style.display = 'flex';
+            const loader = document.getElementById('loadingScreen');
+            if (loader) loader.style.display = 'none';
+            const auth = document.getElementById('authScreen');
+            if (auth) auth.style.display = 'flex';
         }
-    };
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootApp);
+    } else {
+        bootApp();
+    }
+    window.addEventListener('load', bootApp);
     </script>
 </body>
 </html>

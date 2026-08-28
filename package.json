@@ -4,7 +4,7 @@
   "description": "Aura Chat — Mensajería Íntima y Privada para Parejas",
   "main": "index.html",
   "scripts": {
-    "build": "copy /Y index.html www\\index.html && copy /Y sw.js www\\sw.js && copy /Y manifest.json www\\manifest.json"
+    "build": "copy /Y index.html www\\index.html && copy /Y sw.js www\\sw.js && copy /Y manifest.json www\\manifest.json && copy /Y *.min.js www\\ 2>nul || ver >nul"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.2",
