@@ -652,22 +652,37 @@
         try { if (window.navigator && window.navigator.vibrate) window.navigator.vibrate(duration); } catch(e) {}
     }
 
-    function playNotificationSound() {
+    let globalAudioCtx = null;
+    function getUnlockedAudioContext() {
         try {
             const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (!AudioContext) return;
-            const ctx = new AudioContext();
+            if (!AudioContext) return null;
+            if (!globalAudioCtx) globalAudioCtx = new AudioContext();
+            if (globalAudioCtx.state === 'suspended') globalAudioCtx.resume();
+            return globalAudioCtx;
+        } catch(e) {
+            return null;
+        }
+    }
+    ['click', 'touchstart', 'keydown'].forEach(evt => {
+        document.addEventListener(evt, () => getUnlockedAudioContext(), { passive: true });
+    });
+
+    function playNotificationSound() {
+        try {
+            const ctx = getUnlockedAudioContext();
+            if (!ctx) return;
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
             osc.type = 'sine';
             osc.frequency.setValueAtTime(587.33, ctx.currentTime);
             osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12);
-            gain.gain.setValueAtTime(0.25, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+            gain.gain.setValueAtTime(0.4, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
             osc.connect(gain);
             gain.connect(ctx.destination);
             osc.start();
-            osc.stop(ctx.currentTime + 0.35);
+            osc.stop(ctx.currentTime + 0.4);
         } catch(e) {}
     }
 
@@ -1726,7 +1741,7 @@
 
                 if (isMe) {
                     html += `
-                        <div class="relative group flex justify-end items-end gap-1.5 animate-slide-up"
+                        <div class="relative group flex justify-end items-end gap-1.5"
                              ontouchstart="handleMsgTouchStart(event, '${m.id}', '${senderDisplayName}', '${safePreview}', true)"
                              ontouchmove="handleMsgTouchMove(event, this)"
                              ontouchend="handleMsgTouchEnd(event, this, '${m.id}', '${senderDisplayName}', '${safePreview}')">
@@ -1751,7 +1766,7 @@
                     `;
                 } else {
                     html += `
-                        <div class="relative group flex justify-start items-end gap-2 animate-slide-up"
+                        <div class="relative group flex justify-start items-end gap-2"
                              ontouchstart="handleMsgTouchStart(event, '${m.id}', '${senderDisplayName}', '${safePreview}', false)"
                              ontouchmove="handleMsgTouchMove(event, this)"
                              ontouchend="handleMsgTouchEnd(event, this, '${m.id}', '${senderDisplayName}', '${safePreview}')">
@@ -1967,7 +1982,10 @@
                         preview = '📸 Foto';
                     }
 
+                    playNotificationSound();
                     if (document.hidden) {
+                        sendNativeNotification(author.name, preview, author.avatar_url);
+                    } else {
                         showInAppNotification({
                             title: author.name,
                             message: preview,
@@ -1975,9 +1993,6 @@
                             icon: isAudio ? 'mic' : (isPhoto ? 'image' : 'message-circle'),
                             onClick: () => window.focus()
                         });
-                        sendNativeNotification(author.name, preview, author.avatar_url);
-                    } else {
-                        playNotificationSound();
                     }
                 }
             })
@@ -2068,7 +2083,11 @@
                         if (isAudio) previewText = '🎤 Mensaje de voz';
                         else if (isPhoto) previewText = '📸 Foto';
 
+                        playNotificationSound();
+
                         if (document.hidden) {
+                            sendNativeNotification(author.name, previewText, author.avatar_url);
+                        } else {
                             showInAppNotification({
                                 title: author.name,
                                 message: previewText,
@@ -2076,9 +2095,6 @@
                                 icon: isAudio ? 'mic' : (isPhoto ? 'image' : 'message-circle'),
                                 onClick: () => window.focus()
                             });
-                            sendNativeNotification(author.name, previewText, author.avatar_url);
-                        } else {
-                            playNotificationSound();
                         }
                     }
                 }
