@@ -1899,6 +1899,19 @@
         } catch(e) {
             console.warn('[ROAN] Chat insert error:', e);
         }
+
+        // Instant Broadcast to wake up partner's phone in 0ms (same as in aura-app)
+        try {
+            realtimeChannelGlobal?.send({
+                type: 'broadcast',
+                event: 'new_message',
+                payload: {
+                    id: tempId,
+                    sender_id: currentUser.id,
+                    text: payloadText
+                }
+            });
+        } catch(e) {}
     }
 
     async function handleSendChatImage(e) {
@@ -1972,6 +1985,41 @@
             .on('broadcast', { event: 'typing' }, payload => {
                 if (payload.payload && payload.payload.user_id !== currentUser?.id) {
                     showPartnerTyping(payload.payload.name || 'Tu pareja');
+                }
+            })
+            .on('broadcast', { event: 'new_message' }, payload => {
+                const data = payload.payload;
+                if (data && data.sender_id !== currentUser?.id) {
+                    const incomingMsg = {
+                        id: data.id || ('rt_' + Date.now()),
+                        sender_id: data.sender_id,
+                        text: data.text,
+                        created_at: new Date().toISOString()
+                    };
+                    appendOrUpdateMessage(incomingMsg, {
+                        scroll: true,
+                        playSound: true,
+                        isIncoming: true
+                    });
+                    hidePartnerTyping();
+                    const author = getProfile(data.sender_id) || getPartnerProfile();
+                    const isAudio = data.text && data.text.startsWith('[AUDIO');
+                    const isPhoto = data.text && data.text.startsWith('[PHOTO]');
+                    let previewText = data.text;
+                    if (isAudio) previewText = '🎤 Mensaje de voz';
+                    else if (isPhoto) previewText = '📸 Foto';
+
+                    if (document.hidden) {
+                        sendNativeNotification(author.name, previewText, author.avatar_url);
+                    } else {
+                        showInAppNotification({
+                            title: author.name,
+                            message: previewText,
+                            avatar: author.avatar_url,
+                            icon: isAudio ? 'mic' : (isPhoto ? 'image' : 'message-circle'),
+                            onClick: () => window.focus()
+                        });
+                    }
                 }
             })
             .on('broadcast', { event: 'call_offer' }, payload => {
