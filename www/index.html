@@ -465,8 +465,10 @@
 
     <!-- ========================== MODAL: SALA DE LLAMADA ACTIVA ========================== -->
     <div id="activeCallModal" class="hidden fixed inset-0 z-[125] bg-neutral-950 flex flex-col justify-between overflow-hidden select-none">
-        <!-- Remote Video (Full-bleed Background) -->
-        <video id="remoteVideoElement" autoplay playsinline class="absolute inset-0 w-full h-full object-cover z-0"></video>
+        <!-- Remote Video (Full-bleed Background, WhatsApp orientation) -->
+        <video id="remoteVideoElement" autoplay playsinline class="absolute inset-0 w-full h-full object-cover z-0" style="transform: scaleX(1);"></video>
+        <!-- Remote Audio Stream Output -->
+        <audio id="remoteAudioElement" autoplay playsinline class="hidden"></audio>
 
         <!-- Voice Call Avatar Fallback (when video is off) -->
         <div id="voiceCallCenterContainer" class="absolute inset-0 flex flex-col items-center justify-center z-10 space-y-4 bg-gradient-to-b from-neutral-950/80 via-neutral-900/90 to-neutral-950/95">
@@ -480,9 +482,9 @@
             </div>
         </div>
 
-        <!-- Local Video PiP Bubble (Floating Camera) -->
+        <!-- Local Video PiP Bubble (Floating Camera, WhatsApp Mirrored Front Camera) -->
         <div id="localVideoPipContainer" class="absolute top-4 right-4 z-20 w-28 h-40 sm:w-36 sm:h-52 rounded-2xl overflow-hidden shadow-2xl border-2 border-white/30 dark:border-orange-500/40 bg-black/80 backdrop-blur-md">
-            <video id="localVideoElement" autoplay playsinline muted class="w-full h-full object-cover"></video>
+            <video id="localVideoElement" autoplay playsinline muted class="w-full h-full object-cover" style="transform: scaleX(-1);"></video>
         </div>
 
         <!-- Top Call Header Overlay -->
@@ -669,10 +671,27 @@
         } catch(e) {}
     }
 
+    async function requestNotificationPermission() {
+        if (!('Notification' in window)) return;
+        if (Notification.permission === 'default') {
+            try {
+                const res = await Notification.requestPermission();
+                if (res === 'granted') {
+                    toast('Notificaciones activadas en el celular 🔔', 'success');
+                }
+            } catch(e) {}
+        }
+    }
+
     async function sendNativeNotification(title, body, icon, isMsg = true) {
         playNotificationSound();
         if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-        if (!('Notification' in window) || Notification.permission !== 'granted') return;
+        
+        if (!('Notification' in window)) return;
+        if (Notification.permission === 'default') {
+            try { await Notification.requestPermission(); } catch(e) {}
+        }
+        if (Notification.permission !== 'granted') return;
 
         const iconUrl = icon || './icon-192.png';
         const badgeUrl = './badge-96.png';
@@ -680,14 +699,10 @@
             body: body,
             icon: iconUrl,
             badge: badgeUrl,
-            tag: 'aura-chat-msg-' + Date.now(),
+            tag: 'roan-msg-' + Date.now(),
             renotify: true,
             vibrate: [200, 100, 200],
-            data: { url: window.location.href },
-            actions: [
-                { action: 'reply', type: 'text', title: 'Responder', placeholder: 'Escribe tu respuesta...' },
-                { action: 'open_chat', title: 'Abrir Chat' }
-            ]
+            data: { url: window.location.href }
         };
 
         if ('serviceWorker' in navigator) {
@@ -772,8 +787,16 @@
 
         try {
             localStream = await navigator.mediaDevices.getUserMedia({
-                audio: true,
-                video: mode === 'video' ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } : false
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                },
+                video: mode === 'video' ? {
+                    facingMode: isFacingUser ? 'user' : 'environment',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                } : false
             });
         } catch(err) {
             console.error('getUserMedia error:', err);
@@ -787,7 +810,10 @@
         createPeerConnection();
 
         try {
-            const offer = await peerConnection.createOffer();
+            const offer = await peerConnection.createOffer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: mode === 'video'
+            });
             await peerConnection.setLocalDescription(offer);
 
             realtimeChannelGlobal?.send({
@@ -843,8 +869,16 @@
 
         try {
             localStream = await navigator.mediaDevices.getUserMedia({
-                audio: true,
-                video: offerPayload.mode === 'video' ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } : false
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                },
+                video: offerPayload.mode === 'video' ? {
+                    facingMode: isFacingUser ? 'user' : 'environment',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                } : false
             });
         } catch(err) {
             console.error('Error opening media for incoming call:', err);
@@ -861,7 +895,10 @@
 
         try {
             await peerConnection.setRemoteDescription(new RTCSessionDescription(offerPayload.offer));
-            const answer = await peerConnection.createAnswer();
+            const answer = await peerConnection.createAnswer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: offerPayload.mode === 'video'
+            });
             await peerConnection.setLocalDescription(answer);
 
             realtimeChannelGlobal?.send({
@@ -906,8 +943,17 @@
         peerConnection.ontrack = (event) => {
             stopAllCallSounds();
             const remoteVideo = document.getElementById('remoteVideoElement');
+            const remoteAudio = document.getElementById('remoteAudioElement');
+            
             if (remoteVideo && event.streams && event.streams[0]) {
                 remoteVideo.srcObject = event.streams[0];
+                remoteVideo.muted = false;
+                remoteVideo.play().catch(e => console.warn('Remote video playback:', e));
+            }
+            if (remoteAudio && event.streams && event.streams[0]) {
+                remoteAudio.srcObject = event.streams[0];
+                remoteAudio.muted = false;
+                remoteAudio.play().catch(e => console.warn('Remote audio playback:', e));
             }
             document.getElementById('activeCallStatusText')?.classList.add('hidden');
             startCallTimer();
@@ -944,7 +990,11 @@
         if (partnerName) partnerName.innerText = partner.name;
 
         if (mode === 'video') {
-            if (localVideo && localStream) localVideo.srcObject = localStream;
+            if (localVideo && localStream) {
+                localVideo.srcObject = localStream;
+                localVideo.muted = true;
+                localVideo.style.transform = isFacingUser ? 'scaleX(-1)' : 'scaleX(1)';
+            }
             localPip?.classList.remove('hidden');
             voiceCenter?.classList.add('hidden');
             flipBtn?.classList.remove('hidden');
@@ -1000,8 +1050,10 @@
         }
 
         const remoteVideo = document.getElementById('remoteVideoElement');
+        const remoteAudio = document.getElementById('remoteAudioElement');
         const localVideo = document.getElementById('localVideoElement');
         if (remoteVideo) remoteVideo.srcObject = null;
+        if (remoteAudio) remoteAudio.srcObject = null;
         if (localVideo) localVideo.srcObject = null;
 
         document.getElementById('activeCallModal')?.classList.add('hidden');
@@ -1059,22 +1111,30 @@
             videoTrack.stop();
             isFacingUser = !isFacingUser;
             const newStream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: isFacingUser ? 'user' : 'environment' }
+                video: {
+                    facingMode: isFacingUser ? 'user' : 'environment',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
             });
             const newTrack = newStream.getVideoTracks()[0];
             localStream.removeTrack(videoTrack);
             localStream.addTrack(newTrack);
 
             const localVideo = document.getElementById('localVideoElement');
-            if (localVideo) localVideo.srcObject = localStream;
+            if (localVideo) {
+                localVideo.srcObject = localStream;
+                localVideo.style.transform = isFacingUser ? 'scaleX(-1)' : 'scaleX(1)';
+            }
 
             if (peerConnection) {
                 const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
                 if (sender) sender.replaceTrack(newTrack);
             }
-            toast('Cámara cambiada', 'info');
+            toast(isFacingUser ? 'Cámara frontal activada' : 'Cámara trasera activada', 'info');
         } catch(e) {
             console.error('flip camera error:', e);
+            toast('Error al cambiar cámara', 'error');
         }
     }
 
@@ -1449,22 +1509,23 @@
 
         let serverMessages = [];
         try {
-            const { data, error } = await sb.from('messages').select('*').order('created_at', { ascending: true }).limit(200);
-            if (!error && data && data.length > 0) serverMessages = serverMessages.concat(data);
-        } catch(e) {}
+            const { data: chatPosts, error } = await sb.from('posts')
+                .select('*')
+                .ilike('text', '%[CHAT]%')
+                .order('created_at', { ascending: true })
+                .limit(300);
 
-        try {
-            const { data: chatPosts } = await sb.from('posts').select('*').ilike('text', '%CHAT%').order('created_at', { ascending: true }).limit(200);
-            if (chatPosts && chatPosts.length > 0) {
-                const mapped = chatPosts.filter(p => p.text?.includes('[CHAT]')).map(p => ({
+            if (!error && chatPosts && chatPosts.length > 0) {
+                serverMessages = chatPosts.filter(p => p.text && p.text.includes('[CHAT]')).map(p => ({
                     id: p.id,
                     sender_id: p.user_id,
-                    text: p.text.replace(/^\[CHAT\]\s*/, ''),
+                    text: p.text.replace(/^\[CHAT\]\s*/, '').trim(),
                     created_at: p.created_at
                 }));
-                serverMessages = serverMessages.concat(mapped);
             }
-        } catch(e) {}
+        } catch(e) {
+            console.warn('loadChatMessages error:', e);
+        }
 
         const localChat = JSON.parse(localStorage.getItem('aura_local_chat') || '[]');
         const combined = [...localChat, ...currentChatMessages, ...serverMessages];
@@ -1776,25 +1837,15 @@
         localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
         renderChatMessages();
 
-        let insertedOk = false;
         try {
-            const { error: msgErr } = await sb.from('messages').insert({
-                sender_id: currentUser.id,
-                receiver_id: partner.id,
-                text: payloadText
+            await sb.from('posts').insert({
+                user_id: currentUser.id,
+                text: `[CHAT] ${payloadText}`,
+                photo_url: null,
+                reactions: {}
             });
-            if (!msgErr) insertedOk = true;
-        } catch(e) {}
-
-        if (!insertedOk) {
-            try {
-                await sb.from('posts').insert({
-                    user_id: currentUser.id,
-                    text: `[CHAT] ${payloadText}`,
-                    photo_url: null,
-                    reactions: {}
-                });
-            } catch(e) {}
+        } catch(e) {
+            console.warn('Chat insert error:', e);
         }
 
         try {
@@ -1974,7 +2025,7 @@
                     renderChatMessages();
                 }
             })
-            .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, payload => {
+            .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'posts' }, payload => {
                 const targetId = payload.old?.id;
                 if (targetId) {
                     currentChatMessages = currentChatMessages.filter(m => m.id !== targetId);
@@ -1983,38 +2034,53 @@
                     renderChatMessages();
                 }
             })
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
-                loadChatMessages();
-                if (payload.new && payload.new.sender_id !== currentUser.id) {
-                    const author = getProfile(payload.new.sender_id) || getPartnerProfile();
-                    const isAudio = payload.new.text && payload.new.text.startsWith('[AUDIO');
-                    const isPhoto = payload.new.text && payload.new.text.startsWith('[PHOTO]');
-                    let previewText = payload.new.text || '';
-                    if (isAudio) {
-                        const match = payload.new.text.match(/^\[AUDIO:?(\d+)?\]/);
-                        const rawDur = match && match[1] ? parseInt(match[1]) : 0;
-                        const durStr = rawDur > 0 ? ` (0:${rawDur < 10 ? '0' : ''}${rawDur})` : '';
-                        previewText = `🎤 Mensaje de voz${durStr}`;
-                    } else if (isPhoto) {
-                        previewText = '📸 Foto';
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, payload => {
+                const newRow = payload.new;
+                if (newRow && newRow.text && newRow.text.includes('[CHAT]')) {
+                    const cleanText = newRow.text.replace(/^\[CHAT\]\s*/, '').trim();
+                    const isFromMe = newRow.user_id === currentUser?.id;
+                    
+                    const incomingMsg = {
+                        id: newRow.id,
+                        sender_id: newRow.user_id,
+                        text: cleanText,
+                        created_at: newRow.created_at
+                    };
+
+                    const isAlreadyThere = currentChatMessages.some(m => 
+                        (m.id && m.id === incomingMsg.id) || 
+                        (m.sender_id === incomingMsg.sender_id && m.text === incomingMsg.text && Math.abs(new Date(m.created_at || 0) - new Date(incomingMsg.created_at)) < 15000)
+                    );
+
+                    if (!isAlreadyThere) {
+                        currentChatMessages.push(incomingMsg);
+                        localStorage.setItem('aura_local_chat', JSON.stringify(currentChatMessages.slice(-100)));
+                        lastChatHash = '__FORCE_RERENDER__';
+                        renderChatMessages();
                     }
-                    if (document.hidden) {
-                        showInAppNotification({
-                            title: author.name,
-                            message: previewText,
-                            avatar: author.avatar_url,
-                            icon: isAudio ? 'mic' : (isPhoto ? 'image' : 'message-circle'),
-                            onClick: () => window.focus()
-                        });
-                        sendNativeNotification(author.name, previewText, author.avatar_url);
-                    } else {
-                        playNotificationSound();
+
+                    if (!isFromMe) {
+                        hidePartnerTyping();
+                        const author = getProfile(newRow.user_id) || getPartnerProfile();
+                        const isAudio = cleanText.startsWith('[AUDIO');
+                        const isPhoto = cleanText.startsWith('[PHOTO]');
+                        let previewText = cleanText;
+                        if (isAudio) previewText = '🎤 Mensaje de voz';
+                        else if (isPhoto) previewText = '📸 Foto';
+
+                        if (document.hidden) {
+                            showInAppNotification({
+                                title: author.name,
+                                message: previewText,
+                                avatar: author.avatar_url,
+                                icon: isAudio ? 'mic' : (isPhoto ? 'image' : 'message-circle'),
+                                onClick: () => window.focus()
+                            });
+                            sendNativeNotification(author.name, previewText, author.avatar_url);
+                        } else {
+                            playNotificationSound();
+                        }
                     }
-                }
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, payload => {
-                if (payload.new && payload.new.text && payload.new.text.includes('[CHAT]')) {
-                    loadChatMessages();
                 }
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, payload => {
