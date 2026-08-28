@@ -608,12 +608,27 @@
     };
 
     async function loadAllProfiles() {
-        try {
-            const { data } = await sb.from('profiles').select('*');
-            if (data) data.forEach(p => allProfiles[p.id] = p);
-        } catch(e) {}
         allProfiles[PRESETS.roxana.id] = PRESETS.roxana;
         allProfiles[PRESETS.angel.id] = PRESETS.angel;
+
+        try {
+            const { data, error } = await sb.from('profiles').select('*');
+            if (!error && data && data.length > 0) {
+                data.forEach(p => {
+                    if (p && p.id) {
+                        allProfiles[p.id] = { ...allProfiles[p.id], ...p };
+                    }
+                });
+            }
+        } catch(e) {
+            console.warn('loadAllProfiles error:', e);
+        }
+
+        if (currentUser && allProfiles[currentUser.id]) {
+            currentUser = { ...currentUser, ...allProfiles[currentUser.id] };
+            localStorage.setItem('aura_cloud_user', JSON.stringify(currentUser));
+            localStorage.setItem('aura_chat_user', JSON.stringify(currentUser));
+        }
     }
 
     function getProfile(id) {
@@ -1362,6 +1377,21 @@
                     } else {
                         playNotificationSound();
                     }
+                }
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, payload => {
+                if (payload.new && payload.new.id) {
+                    allProfiles[payload.new.id] = { ...allProfiles[payload.new.id], ...payload.new };
+                    if (currentUser && currentUser.id === payload.new.id) {
+                        currentUser = { ...currentUser, ...payload.new };
+                        localStorage.setItem('aura_cloud_user', JSON.stringify(currentUser));
+                        localStorage.setItem('aura_chat_user', JSON.stringify(currentUser));
+                    }
+                    const partner = getPartnerProfile();
+                    document.getElementById('chatPartnerName').innerText = partner.name;
+                    document.getElementById('chatPartnerAvatar').src = partner.avatar_url;
+                    lastChatHash = '__FORCE_RERENDER__';
+                    renderChatMessages();
                 }
             })
             .subscribe();
