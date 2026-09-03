@@ -512,6 +512,11 @@
                     <i id="callVideoIcon" data-lucide="video" class="w-5 h-5"></i>
                 </button>
 
+                <!-- Toggle Speaker / Audio Output -->
+                <button id="callToggleSpeakerBtn" onclick="toggleCallSpeaker()" class="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer active:scale-90 transition-all" title="Altavoz">
+                    <i id="callSpeakerIcon" data-lucide="volume-2" class="w-5 h-5"></i>
+                </button>
+
                 <!-- Switch Camera (Front/Back) -->
                 <button id="callFlipCameraBtn" onclick="flipCallCamera()" class="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer active:scale-90 transition-all" title="Cambiar Cámara">
                     <i data-lucide="camera" class="w-5 h-5"></i>
@@ -693,10 +698,17 @@
                 // Request Android runtime permissions
                 await window.Capacitor.Plugins.LocalNotifications.requestPermissions();
 
-                // Register Action Types for Interactive Incoming Call Notification
+                // Register Action Types for Interactive Chat & Call Notifications (WhatsApp Style)
                 try {
                     await window.Capacitor.Plugins.LocalNotifications.registerActionTypes({
                         types: [
+                            {
+                                id: 'CHAT_MESSAGE',
+                                actions: [
+                                    { id: 'reply', title: '💬 Responder', input: true, inputButtonTitle: 'Enviar', inputPlaceholder: 'Escribe tu respuesta...' },
+                                    { id: 'mark_read', title: '✓ Marcar leído' }
+                                ]
+                            },
                             {
                                 id: 'INCOMING_CALL',
                                 actions: [
@@ -708,7 +720,7 @@
                     });
                 } catch(e) {}
 
-                // Max-priority channel for incoming voice and video calls (Heads-Up popup banner on screen)
+                // Max-priority channel for incoming calls (Heads-Up popup banner on screen)
                 try {
                     await window.Capacitor.Plugins.LocalNotifications.createChannel({
                         id: 'roan_calls_channel',
@@ -716,22 +728,20 @@
                         description: 'Notificaciones emergentes de llamadas y videollamadas',
                         importance: 5,
                         visibility: 1,
-                        sound: 'ringtone.wav',
                         vibration: true,
                         lights: true,
                         lightColor: '#f43f5e'
                     });
                 } catch(e) {}
 
-                // High-priority channel for chat messages
+                // High-priority channel for chat messages (Heads-Up popup banner on screen like WhatsApp)
                 try {
                     await window.Capacitor.Plugins.LocalNotifications.createChannel({
                         id: 'roan_messages_channel',
                         name: 'Mensajes ROAN',
-                        description: 'Notificaciones de mensajes de chat',
-                        importance: 4,
+                        description: 'Notificaciones emergentes de mensajes de chat estilo WhatsApp',
+                        importance: 5,
                         visibility: 1,
-                        sound: 'beep.wav',
                         vibration: true,
                         lights: true,
                         lightColor: '#f43f5e'
@@ -752,9 +762,9 @@
 
     async function sendNativeNotification(title, body, icon, isMsg = true) {
         playNotificationSound();
-        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        if (navigator.vibrate) navigator.vibrate([150, 80, 150]);
 
-        // 1. Capacitor Native Android System Tray (Heads-Up popup when app is outside/minimized)
+        // 1. Capacitor Native Android System Tray (Instant Heads-Up popup banner WhatsApp-style)
         if (window.Capacitor?.Plugins?.LocalNotifications) {
             try {
                 await window.Capacitor.Plugins.LocalNotifications.schedule({
@@ -764,9 +774,12 @@
                             body: body,
                             id: Math.floor(Math.random() * 1000000),
                             channelId: 'roan_messages_channel',
-                            schedule: { at: new Date(Date.now() + 50) },
-                            sound: 'beep.wav',
-                            extra: { url: window.location.href }
+                            smallIcon: 'ic_launcher',
+                            largeIcon: icon || 'ic_launcher',
+                            actionTypeId: 'CHAT_MESSAGE',
+                            ongoing: false,
+                            autoCancel: true,
+                            extra: { url: window.location.href, type: 'CHAT_MSG' }
                         }
                     ]
                 });
@@ -885,8 +898,8 @@
                             body: callBody,
                             id: 999999,
                             channelId: 'roan_calls_channel',
-                            schedule: { at: new Date(Date.now() + 50) },
-                            sound: 'ringtone.wav',
+                            smallIcon: 'ic_launcher',
+                            largeIcon: avatarUrl,
                             ongoing: true,
                             autoCancel: false,
                             actionTypeId: 'INCOMING_CALL',
@@ -953,6 +966,60 @@
         }
     }
 
+    /* Helper: Optimizar SDP de WebRTC para códec Opus de alta fidelidad, FEC contra pérdida de paquetes y DTX contra ruido de fondo */
+    function tuneOpusAudioSDP(sdp) {
+        if (!sdp) return sdp;
+        const opusMatch = sdp.match(/a=rtpmap:(\d+)\s+opus\/48000/i);
+        if (!opusMatch) return sdp;
+        const pt = opusMatch[1];
+        const fmtpRegex = new RegExp(`a=fmtp:${pt}\\s+(.*)`, 'i');
+        const fmtpMatch = sdp.match(fmtpRegex);
+        const opusParams = 'useinbandfec=1;usedtx=1;maxaveragebitrate=64000;stereo=0;sprop-stereo=0;cbr=0;minptime=10';
+        if (fmtpMatch) {
+            return sdp.replace(fmtpRegex, `a=fmtp:${pt} ${fmtpMatch[1]};${opusParams}`);
+        } else {
+            return sdp.replace(opusMatch[0], `${opusMatch[0]}\r\na=fmtp:${pt} ${opusParams}`);
+        }
+    }
+
+    const HD_AUDIO_CONSTRAINTS = {
+        echoCancellation: { ideal: true },
+        noiseSuppression: { ideal: true },
+        autoGainControl: { ideal: true },
+        channelCount: 1,
+        googEchoCancellation: true,
+        googAutoGainControl: true,
+        googNoiseSuppression: true,
+        googHighpassFilter: true,
+        googTypingNoiseDetection: true
+    };
+
+    let isCallSpeakerOn = true;
+    function toggleCallSpeaker() {
+        triggerHaptic();
+        isCallSpeakerOn = !isCallSpeakerOn;
+        const icon = document.getElementById('callSpeakerIcon');
+        const btn = document.getElementById('callToggleSpeakerBtn');
+        const remoteVideo = document.getElementById('remoteVideoElement');
+        const remoteAudio = document.getElementById('remoteAudioElement');
+
+        const activeTarget = (activeCallMode === 'video') ? remoteVideo : remoteAudio;
+        if (activeTarget) {
+            activeTarget.volume = isCallSpeakerOn ? 1.0 : 0.4;
+        }
+
+        if (isCallSpeakerOn) {
+            icon?.setAttribute('data-lucide', 'volume-2');
+            btn?.classList.remove('bg-rose-500/40', 'text-rose-400');
+            toast('Altavoz activado 🔊', 'info');
+        } else {
+            icon?.setAttribute('data-lucide', 'volume-1');
+            btn?.classList.add('bg-rose-500/40', 'text-rose-400');
+            toast('Modo auricular activado 🔈', 'info');
+        }
+        if (window.lucide && window.lucide.createIcons) lucide.createIcons();
+    }
+
     async function initiateWebRTCCall(mode = 'video') {
         if (!currentUser) return toast('Inicia sesión para llamar', 'error');
         triggerHaptic();
@@ -962,11 +1029,7 @@
 
         try {
             localStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                },
+                audio: HD_AUDIO_CONSTRAINTS,
                 video: mode === 'video' ? {
                     facingMode: isFacingUser ? 'user' : 'environment',
                     width: { ideal: 1280 },
@@ -985,10 +1048,16 @@
         createPeerConnection();
 
         try {
-            const offer = await peerConnection.createOffer({
+            let offer = await peerConnection.createOffer({
                 offerToReceiveAudio: true,
                 offerToReceiveVideo: mode === 'video'
             });
+            if (offer.sdp) {
+                offer = new RTCSessionDescription({
+                    type: offer.type,
+                    sdp: tuneOpusAudioSDP(offer.sdp)
+                });
+            }
             await peerConnection.setLocalDescription(offer);
 
             realtimeChannelGlobal?.send({
@@ -1048,11 +1117,7 @@
 
         try {
             localStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                },
+                audio: HD_AUDIO_CONSTRAINTS,
                 video: offerPayload.mode === 'video' ? {
                     facingMode: isFacingUser ? 'user' : 'environment',
                     width: { ideal: 1280 },
@@ -1074,10 +1139,16 @@
 
         try {
             await peerConnection.setRemoteDescription(new RTCSessionDescription(offerPayload.offer));
-            const answer = await peerConnection.createAnswer({
+            let answer = await peerConnection.createAnswer({
                 offerToReceiveAudio: true,
                 offerToReceiveVideo: offerPayload.mode === 'video'
             });
+            if (answer.sdp) {
+                answer = new RTCSessionDescription({
+                    type: answer.type,
+                    sdp: tuneOpusAudioSDP(answer.sdp)
+                });
+            }
             await peerConnection.setLocalDescription(answer);
 
             realtimeChannelGlobal?.send({
@@ -1124,17 +1195,37 @@
             stopAllCallSounds();
             const remoteVideo = document.getElementById('remoteVideoElement');
             const remoteAudio = document.getElementById('remoteAudioElement');
-            
-            if (remoteVideo && event.streams && event.streams[0]) {
-                remoteVideo.srcObject = event.streams[0];
-                remoteVideo.muted = false;
-                remoteVideo.play().catch(e => console.warn('Remote video playback:', e));
+            const stream = (event.streams && event.streams[0]) ? event.streams[0] : null;
+            if (!stream) return;
+
+            if (activeCallMode === 'video') {
+                // In video mode: remoteVideoElement is the SOLE audio & video player
+                if (remoteVideo && remoteVideo.srcObject !== stream) {
+                    remoteVideo.srcObject = stream;
+                    remoteVideo.muted = false;
+                    remoteVideo.volume = isCallSpeakerOn ? 1.0 : 0.4;
+                    remoteVideo.play().catch(e => console.warn('Remote video playback:', e));
+                }
+                // Strictly mute and clear remoteAudioElement to eliminate double-play echo!
+                if (remoteAudio) {
+                    remoteAudio.srcObject = null;
+                    remoteAudio.muted = true;
+                    remoteAudio.volume = 0;
+                }
+            } else {
+                // In voice-only mode: remoteAudioElement handles audio exclusively
+                if (remoteAudio && remoteAudio.srcObject !== stream) {
+                    remoteAudio.srcObject = stream;
+                    remoteAudio.muted = false;
+                    remoteAudio.volume = isCallSpeakerOn ? 1.0 : 0.4;
+                    remoteAudio.play().catch(e => console.warn('Remote audio playback:', e));
+                }
+                if (remoteVideo) {
+                    remoteVideo.srcObject = null;
+                    remoteVideo.muted = true;
+                }
             }
-            if (remoteAudio && event.streams && event.streams[0]) {
-                remoteAudio.srcObject = event.streams[0];
-                remoteAudio.muted = false;
-                remoteAudio.play().catch(e => console.warn('Remote audio playback:', e));
-            }
+
             document.getElementById('activeCallStatusText')?.classList.add('hidden');
             startCallTimer();
         };
@@ -1395,6 +1486,28 @@
         return isRox ? (allProfiles[PRESETS.angel.id] || allProfiles['angel'] || PRESETS.angel) : (allProfiles[PRESETS.roxana.id] || allProfiles['roxana'] || PRESETS.roxana);
     }
 
+    function isSenderMe(senderId) {
+        if (!currentUser || !senderId) return false;
+        if (senderId === 'me') return true;
+        if (senderId === currentUser.id) return true;
+        const currentIsRox = (currentUser.email?.toLowerCase().includes('roxana') || currentUser.name?.toLowerCase().includes('roxana') || currentUser.id === PRESETS.roxana.id);
+        const sid = String(senderId).toLowerCase();
+        const senderIsRox = (sid.includes('roxana') || sid === PRESETS.roxana.id || sid.endsWith('0001'));
+        return currentIsRox === senderIsRox;
+    }
+
+    function resolveSenderProfile(senderId) {
+        if (!senderId) return getPartnerProfile();
+        const sid = String(senderId).toLowerCase();
+        if (sid.includes('roxana') || sid === PRESETS.roxana.id || sid.endsWith('0001')) {
+            return allProfiles[PRESETS.roxana.id] || allProfiles['roxana'] || PRESETS.roxana;
+        }
+        if (sid.includes('angel') || sid === PRESETS.angel.id || sid.endsWith('0002')) {
+            return allProfiles[PRESETS.angel.id] || allProfiles['angel'] || PRESETS.angel;
+        }
+        return getProfile(senderId);
+    }
+
     async function loginAsPreset(key) {
         triggerHaptic();
         const user = (key === 'roxana') ? (allProfiles[PRESETS.roxana.id] || PRESETS.roxana) : (allProfiles[PRESETS.angel.id] || PRESETS.angel);
@@ -1568,45 +1681,142 @@
         } catch(e) {}
     }
 
+    /* ===== IMAGE COMPRESSOR & PHOTO SENDING ===== */
+    function compressImageFile(file, maxWidth = 1000, quality = 0.75) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (event) => {
+                const img = new Image();
+                img.src = event.target.result;
+                img.onload = () => {
+                    let width = img.width;
+                    let height = img.height;
+                    if (width > maxWidth || height > maxWidth) {
+                        if (width > height) {
+                            height = Math.round((height * maxWidth) / width);
+                            width = maxWidth;
+                        } else {
+                            width = Math.round((width * maxWidth) / height);
+                            height = maxWidth;
+                        }
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                    resolve(dataUrl);
+                };
+                img.onerror = () => resolve(event.target.result);
+            };
+            reader.onerror = () => resolve(null);
+        });
+    }
+
+    async function handleSendChatImage(event) {
+        const file = event.target?.files?.[0];
+        if (!file) return;
+        event.target.value = '';
+
+        toast('Comprimiendo y enviando foto... 📸', 'info');
+        triggerHaptic();
+
+        try {
+            const compressedBase64 = await compressImageFile(file, 1000, 0.75);
+            if (!compressedBase64) {
+                return toast('Error al procesar la imagen', 'error');
+            }
+            await handleSendChatMessage(`[PHOTO]${compressedBase64}`);
+            toast('¡Foto enviada! 📸💕', 'success');
+        } catch(e) {
+            console.error('Send image error:', e);
+            toast('Error al enviar imagen', 'error');
+        }
+    }
+
     /* ===== VOICE NOTES ===== */
-    function togglePlayVoiceNote(btn, audioKey) {
+    function togglePlayVoiceNote(btn, audioKey, defaultDuration = 0) {
         triggerHaptic();
         const audioSrc = (window._cachedAudios && window._cachedAudios[audioKey]) ? window._cachedAudios[audioKey] : audioKey;
         if (!audioSrc) return toast('No se encontró el audio', 'error');
+
+        const container = btn.closest('.flex');
+        const progressBar = container?.querySelector('.voice-progress-bar');
+        const currentTimeEl = container?.querySelector('.voice-current-time');
 
         let player = btn._audioPlayer;
         if (!player) {
             player = new Audio(audioSrc);
             player.preload = 'auto';
             btn._audioPlayer = player;
-        }
 
-        const icon = btn.querySelector('.voice-play-icon');
+            player.ontimeupdate = () => {
+                const dur = player.duration || defaultDuration || 1;
+                const cur = player.currentTime || 0;
+                const pct = Math.min(100, Math.max(0, (cur / dur) * 100));
+                if (progressBar) progressBar.style.width = pct + '%';
+                if (currentTimeEl) {
+                    const m = Math.floor(cur / 60);
+                    const s = Math.floor(cur % 60);
+                    currentTimeEl.innerText = `${m}:${s < 10 ? '0' : ''}${s}`;
+                }
+            };
+
+            player.onended = () => {
+                btn.innerHTML = '<svg class="w-3.5 h-3.5 voice-play-icon ml-0.5" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
+                if (progressBar) progressBar.style.width = '0%';
+                if (currentTimeEl) currentTimeEl.innerText = '0:00';
+                currentPlayingAudio = null;
+            };
+
+            player.onerror = () => {
+                btn.innerHTML = '<svg class="w-3.5 h-3.5 voice-play-icon ml-0.5" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
+                currentPlayingAudio = null;
+                toast('Error al reproducir audio', 'error');
+            };
+        }
 
         if (currentPlayingAudio && currentPlayingAudio !== player) {
             currentPlayingAudio.pause();
             currentPlayingAudio.currentTime = 0;
-            document.querySelectorAll('.voice-play-icon').forEach(ic => ic.setAttribute('data-lucide', 'play'));
-            lucide.createIcons();
+            document.querySelectorAll('.voice-play-icon').forEach(ic => {
+                const parentBtn = ic.closest('button');
+                if (parentBtn) {
+                    parentBtn.innerHTML = '<svg class="w-3.5 h-3.5 voice-play-icon ml-0.5" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
+                }
+            });
+            document.querySelectorAll('.voice-progress-bar').forEach(pb => pb.style.width = '0%');
+            document.querySelectorAll('.voice-current-time').forEach(ct => ct.innerText = '0:00');
         }
 
         if (player.paused) {
             player.play().then(() => {
                 currentPlayingAudio = player;
-                if (icon) { icon.setAttribute('data-lucide', 'pause'); lucide.createIcons(); }
+                btn.innerHTML = '<svg class="w-3.5 h-3.5 voice-play-icon" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
             }).catch(err => {
-                console.error('Audio playback error:', err);
-                toast('Error al reproducir audio', 'error');
+                console.error('Audio play error:', err);
+                toast('Error al iniciar audio', 'error');
             });
-
-            player.onended = () => {
-                if (icon) { icon.setAttribute('data-lucide', 'play'); lucide.createIcons(); }
-                currentPlayingAudio = null;
-            };
         } else {
             player.pause();
-            if (icon) { icon.setAttribute('data-lucide', 'play'); lucide.createIcons(); }
+            btn.innerHTML = '<svg class="w-3.5 h-3.5 voice-play-icon ml-0.5" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
             currentPlayingAudio = null;
+        }
+    }
+
+    function seekVoiceNote(e, trackEl, audioKey) {
+        e.stopPropagation();
+        const container = trackEl.closest('.flex');
+        const playBtn = container?.querySelector('button');
+        if (!playBtn || !playBtn._audioPlayer) return;
+        const player = playBtn._audioPlayer;
+        const rect = trackEl.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const pct = Math.max(0, Math.min(1, clickX / rect.width));
+        if (player.duration) {
+            player.currentTime = pct * player.duration;
         }
     }
 
@@ -1687,8 +1897,10 @@
 
     function renderSingleMessageHtml(m) {
         if (!m || !m.text) return '';
-        const isMe = (m.sender_id === currentUser?.id || m.user_id === currentUser?.id || m.sender_id === 'me');
-        const partner = getPartnerProfile();
+        const isMe = isSenderMe(m.sender_id || m.user_id);
+        const senderProfile = isMe ? (currentUser || PRESETS.angel) : resolveSenderProfile(m.sender_id || m.user_id);
+        const senderDisplayName = isMe ? (currentUser?.name || 'Tú') : (senderProfile?.name || 'Tu amor');
+        const senderAvatar = senderProfile?.avatar_url || (isMe ? currentUser?.avatar_url : getPartnerProfile().avatar_url);
         const msgDate = m.created_at ? new Date(m.created_at) : new Date();
         const timeStr = isNaN(msgDate.getTime()) ? '' : msgDate.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true });
 
@@ -1728,22 +1940,18 @@
 
             contentHtml = `
                 ${replyQuoteHtml}
-                <div class="flex items-center gap-2 py-0.5">
-                    <button onclick="togglePlayVoiceNote(this, '${audioKey}')" class="w-7 h-7 rounded-full ${isMe ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-gradient-to-tr from-pink-500 to-rose-500 dark:from-orange-500 dark:to-amber-500 text-white'} flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all flex-shrink-0 shadow-sm" title="Reproducir">
-                        <i data-lucide="play" class="w-3.5 h-3.5 voice-play-icon ml-0.5"></i>
+                <div class="flex items-center gap-2.5 py-1 min-w-[170px] sm:min-w-[210px]">
+                    <button onclick="togglePlayVoiceNote(this, '${audioKey}', ${rawDuration})" class="w-8 h-8 rounded-full ${isMe ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-gradient-to-tr from-pink-500 to-rose-500 dark:from-orange-500 dark:to-amber-500 text-white'} flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all flex-shrink-0 shadow-sm" title="Reproducir nota de voz">
+                        <svg class="w-3.5 h-3.5 voice-play-icon ml-0.5" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5"><polygon points="6 3 20 12 6 21 6 3"/></svg>
                     </button>
-                    <div class="flex flex-col justify-center gap-0.5 min-w-[85px]">
-                        <div class="flex items-center gap-[2.5px] h-3 opacity-90">
-                            <span class="w-[2px] h-1.5 bg-current rounded-full"></span>
-                            <span class="w-[2px] h-3 bg-current rounded-full"></span>
-                            <span class="w-[2px] h-1.5 bg-current rounded-full"></span>
-                            <span class="w-[2px] h-3.5 bg-current rounded-full animate-pulse"></span>
-                            <span class="w-[2px] h-2.5 bg-current rounded-full"></span>
-                            <span class="w-[2px] h-3 bg-current rounded-full"></span>
-                            <span class="w-[2px] h-1.5 bg-current rounded-full"></span>
-                            <span class="w-[2px] h-2 bg-current rounded-full"></span>
+                    <div class="flex-1 flex flex-col justify-center gap-1">
+                        <div class="relative w-full h-1.5 rounded-full ${isMe ? 'bg-white/30' : 'bg-pink-200/60 dark:bg-neutral-700/60'} overflow-hidden cursor-pointer" onclick="seekVoiceNote(event, this, '${audioKey}')" title="Adelantar / Retroceder">
+                            <div class="voice-progress-bar h-full rounded-full ${isMe ? 'bg-white' : 'bg-gradient-to-r from-pink-500 to-rose-500 dark:from-orange-400 dark:to-amber-500'} transition-all" style="width: 0%;"></div>
                         </div>
-                        <span class="text-[8.5px] ${isMe ? 'text-white/75' : 'opacity-55'} font-mono leading-none">${durationStr}</span>
+                        <div class="flex items-center justify-between text-[9px] ${isMe ? 'text-white/80' : 'opacity-60'} font-mono leading-none">
+                            <span class="voice-current-time">0:00</span>
+                            <span class="voice-total-time">${durationStr}</span>
+                        </div>
                     </div>
                 </div>
             `;
@@ -1767,13 +1975,11 @@
             `;
         }
 
-        const senderDisplayName = isMe ? (currentUser?.name || 'Tú') : partner.name;
         const safePreview = escapeHtml(previewSnippet.substring(0, 60));
-        const msgKey = `${m.sender_id || currentUser?.id}_${encodeURIComponent((m.text || '').substring(0, 30))}`;
 
         if (isMe) {
             return `
-                <div id="msg-bubble-${m.id}" data-msg-id="${m.id}" data-msg-key="${msgKey}" data-sender-id="${m.sender_id || currentUser.id}"
+                <div id="msg-bubble-${m.id}" data-msg-id="${m.id}" data-sender-id="${m.sender_id || currentUser.id}" ${m.db_id ? `data-db-id="${m.db_id}"` : ''}
                      class="relative group flex justify-end items-end gap-1.5 transition-all duration-200"
                      ontouchstart="handleMsgTouchStart(event, '${m.id}', '${senderDisplayName}', '${safePreview}', true)"
                      ontouchmove="handleMsgTouchMove(event, this)"
@@ -1799,12 +2005,12 @@
             `;
         } else {
             return `
-                <div id="msg-bubble-${m.id}" data-msg-id="${m.id}" data-msg-key="${msgKey}" data-sender-id="${m.sender_id}"
+                <div id="msg-bubble-${m.id}" data-msg-id="${m.id}" data-sender-id="${m.sender_id}" ${m.db_id ? `data-db-id="${m.db_id}"` : ''}
                      class="relative group flex justify-start items-end gap-2 transition-all duration-200"
                      ontouchstart="handleMsgTouchStart(event, '${m.id}', '${senderDisplayName}', '${safePreview}', false)"
                      ontouchmove="handleMsgTouchMove(event, this)"
                      ontouchend="handleMsgTouchEnd(event, this, '${m.id}', '${senderDisplayName}', '${safePreview}')">
-                    <img src="${partner.avatar_url}" class="w-6 h-6 rounded-full object-cover border border-pink-300 dark:border-orange-400 mb-1 flex-shrink-0 shadow-sm">
+                    <img src="${senderAvatar}" class="w-6 h-6 rounded-full object-cover border border-pink-300 dark:border-orange-400 mb-1 flex-shrink-0 shadow-sm" alt="${senderDisplayName}">
                     <div class="${isPhoto ? 'p-1 rounded-2xl rounded-bl-sm' : (isAudio ? 'px-2.5 py-1.5 rounded-2xl rounded-bl-sm' : 'px-3.5 py-2 rounded-2xl rounded-bl-sm')} max-w-[82%] glass-card border border-pink-200/50 dark:border-orange-500/20 shadow-md space-y-0.5">
                         ${contentHtml}
                         ${!isPhoto ? `
@@ -1829,8 +2035,19 @@
 
     function parseChatRow(row) {
         if (!row || !row.text) return null;
-        const match = row.text.match(/^\[CHAT(?:\|mid:([^\]]+))?\]\s*([\s\S]*)$/);
-        if (!match) return null;
+        const match = row.text.match(/^\s*\[CHAT(?:\|mid:([^\]]+))?\]\s*([\s\S]*)$/i);
+        if (!match) {
+            if (row.text.startsWith('[AUDIO') || row.text.startsWith('[PHOTO]')) {
+                return {
+                    id: row.id,
+                    db_id: row.id,
+                    sender_id: row.user_id,
+                    text: row.text.trim(),
+                    created_at: row.created_at
+                };
+            }
+            return null;
+        }
         const customMid = match[1];
         const cleanText = (match[2] || '').trim();
         return {
@@ -1847,19 +2064,22 @@
         const list = document.getElementById('chatMessagesList');
         if (!list) return;
 
-        // 1. Direct ID check: if already in DOM, NEVER re-render or flicker!
+        // 1. Direct ID check: if already in DOM, never re-render or flicker!
         if (renderedMsgIds.has(m.id) || document.getElementById(`msg-bubble-${m.id}`)) {
+            if (m.db_id) {
+                const el = document.getElementById(`msg-bubble-${m.id}`);
+                if (el) el.dataset.dbId = m.db_id;
+            }
             return;
         }
 
-        // 2. Exact content-key deduplication (prevents duplicate bubbles)
-        const msgKey = `${m.sender_id}_${encodeURIComponent((m.text || '').substring(0, 30))}`;
-        const existingByKey = list.querySelector(`[data-msg-key="${msgKey}"]`);
-        if (existingByKey) {
-            renderedMsgIds.add(m.id);
-            existingByKey.id = `msg-bubble-${m.id}`;
-            existingByKey.dataset.msgId = m.id;
-            return;
+        // 2. Direct DB ID check if message came from another event
+        if (m.db_id) {
+            const elByDbId = list.querySelector(`[data-db-id="${m.db_id}"]`);
+            if (elByDbId) {
+                renderedMsgIds.add(m.id);
+                return;
+            }
         }
 
         // Remove empty state placeholder if present
@@ -2046,26 +2266,6 @@
         } catch(e) {}
     }
 
-    async function handleSendChatImage(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        toast('Enviando imagen...', 'info');
-        triggerHaptic();
-
-        try {
-            const reader = new FileReader();
-            reader.onload = async () => {
-                const base64 = reader.result;
-                await handleSendChatMessage(`[PHOTO] ${base64}`);
-                toast('Foto enviada', 'success');
-            };
-            reader.readAsDataURL(file);
-        } catch(err) {
-            toast('Error al procesar foto', 'error');
-        }
-        e.target.value = '';
-    }
-
     function handleChatTypingInput() {
         const now = Date.now();
         if (now - lastTypingBroadcast > 2000) {
@@ -2121,7 +2321,7 @@
             })
             .on('broadcast', { event: 'new_message' }, payload => {
                 const data = payload.payload;
-                if (data && data.sender_id !== currentUser?.id) {
+                if (data && !isSenderMe(data.sender_id)) {
                     const incomingMsg = {
                         id: data.id || ('rt_' + Date.now()),
                         sender_id: data.sender_id,
@@ -2134,11 +2334,11 @@
                         isIncoming: true
                     });
                     hidePartnerTyping();
-                    const author = getProfile(data.sender_id) || getPartnerProfile();
+                    const author = resolveSenderProfile(data.sender_id);
                     const isAudio = data.text && data.text.startsWith('[AUDIO');
                     const isPhoto = data.text && data.text.startsWith('[PHOTO]');
                     let previewText = data.text;
-                    if (isAudio) previewText = '🎤 Mensaje de voz';
+                    if (isAudio) previewText = '🎤 Nota de voz';
                     else if (isPhoto) previewText = '📸 Foto';
 
                     sendNativeNotification(author.name, previewText, author.avatar_url);
@@ -2183,7 +2383,7 @@
                 toast(payload.payload?.reason === 'busy' ? 'Línea ocupada' : 'Llamada rechazada', 'info');
             })
             .on('broadcast', { event: 'messages_read' }, payload => {
-                if (payload.payload && payload.payload.reader_id !== currentUser?.id) {
+                if (payload.payload && !isSenderMe(payload.payload.reader_id)) {
                     lastPartnerReadTime = payload.payload.read_at || Date.now();
                     localStorage.setItem('roan_last_read_time', lastPartnerReadTime);
                     // Update all outgoing messages status icons directly in DOM without re-rendering!
@@ -2223,7 +2423,7 @@
                 if (newRow && newRow.text && newRow.text.includes('[CHAT')) {
                     const incomingMsg = parseChatRow(newRow);
                     if (!incomingMsg) return;
-                    const isFromMe = incomingMsg.sender_id === currentUser?.id;
+                    const isFromMe = isSenderMe(incomingMsg.sender_id);
 
                     appendOrUpdateMessage(incomingMsg, {
                         scroll: true,
@@ -2233,11 +2433,11 @@
 
                     if (!isFromMe) {
                         hidePartnerTyping();
-                        const author = getProfile(incomingMsg.sender_id) || getPartnerProfile();
+                        const author = resolveSenderProfile(incomingMsg.sender_id);
                         const isAudio = incomingMsg.text.startsWith('[AUDIO');
                         const isPhoto = incomingMsg.text.startsWith('[PHOTO]');
                         let previewText = incomingMsg.text;
-                        if (isAudio) previewText = '🎤 Mensaje de voz';
+                        if (isAudio) previewText = '🎤 Nota de voz';
                         else if (isPhoto) previewText = '📸 Foto';
 
                         sendNativeNotification(author.name, previewText, author.avatar_url);
@@ -2278,13 +2478,13 @@
             if (document.visibilityState === 'visible') loadChatMessages();
         });
 
-        // Background sync: every 5 seconds, append any missing messages without wiping DOM
+        // Background sync: check every 4 seconds for any missing messages even when minimized
         if (chatPollingInterval) clearInterval(chatPollingInterval);
         chatPollingInterval = setInterval(() => {
-            if (!document.hidden && currentUser) {
+            if (currentUser) {
                 loadChatMessages();
             }
-        }, 5000);
+        }, 4000);
     }
 
     /* ===== INIT ===== */
@@ -2319,15 +2519,36 @@
             initDeviceNotificationChannels();
         } catch(e) {}
 
-        // Register Capacitor LocalNotifications action handler
+        // Register Capacitor LocalNotifications action handler (WhatsApp style Quick Reply & Call Actions)
         if (window.Capacitor?.Plugins?.LocalNotifications) {
             try {
                 window.Capacitor.Plugins.LocalNotifications.addListener('localNotificationActionPerformed', (notification) => {
                     console.log('[ROAN] LocalNotification action:', notification);
-                    if (notification.notification?.id === 999999 || notification.notification?.extra?.type === 'CALL_OFFER') {
-                        if (pendingIncomingOffer) {
-                            acceptIncomingCall();
+                    const notif = notification.notification;
+                    const actionId = notification.actionId;
+                    const inputValue = notification.inputValue;
+
+                    if (notif?.id === 999999 || notif?.extra?.type === 'CALL_OFFER') {
+                        if (actionId === 'reject_call') {
+                            rejectIncomingCall();
+                        } else {
+                            if (pendingIncomingOffer) {
+                                acceptIncomingCall();
+                            }
                         }
+                    } else if (actionId === 'reply' && inputValue) {
+                        handleSendChatMessage(inputValue);
+                    } else if (actionId === 'mark_read') {
+                        try {
+                            realtimeChannelGlobal?.send({
+                                type: 'broadcast',
+                                event: 'messages_read',
+                                payload: { reader_id: currentUser?.id, read_at: Date.now() }
+                            });
+                        } catch(e) {}
+                    } else {
+                        window.focus();
+                        scrollChatToBottom(false);
                     }
                 });
             } catch(e) {}
